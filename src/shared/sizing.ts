@@ -1,17 +1,28 @@
 /**
- * Position sizing — USD account, USD-quoted instruments (v1).
+ * Position sizing — USD account, all three instrument categories.
  *
  * Given an account balance, a risk percentage, a stop-loss distance in pips,
- * and an instrument, compute the lot size that risks at most the intended
+ * and an instrument (plus any market rates the instrument needs to resolve
+ * its USD pip value), compute the lot size that risks at most the intended
  * amount if the stop is hit. Lots are rounded DOWN to `lotStep` so the
  * realised risk never exceeds the intended risk.
  *
- * v1 intentionally supports only USD-quoted instruments so pip value per lot
- * is constant and does not require a current price or a cross rate. Non-USD
- * quotes throw `UnsupportedQuoteCurrencyError` — that scope lands in M1.
+ * Pip-value math is delegated to `pipValueInUsd`; sizing owns only the
+ * intended-risk calculation, ideal-lot computation, rounding, and clamping
+ * against `minLots` / `maxLots`. Which market rates the caller must supply
+ * depends on the instrument's category — see `pipValueInUsd` for details:
+ *
+ * - direct   (quote = USD): no rates required.
+ * - inverse  (base = USD):  `instrumentPrice` required.
+ * - cross    (neither USD): `quoteToUsdRate` required.
+ *
+ * Missing or non-finite/non-positive rates propagate as
+ * `InvalidPipValueInputError` from the pip-value kernel; the caller should
+ * treat it the same as a numeric `InvalidSizingInputError`.
  */
 
-import type { InstrumentSpec } from "./instruments.js";
+import type { InstrumentCategory } from "./instruments.js";
+import { pipValueInUsd } from "./pip-value.js";
 
 export interface PositionSizeInput {
   accountBalanceUsd: number;
@@ -19,7 +30,17 @@ export interface PositionSizeInput {
   riskPercent: number;
   /** Distance from entry to stop loss, in pips of the instrument. Must be > 0. */
   stopLossPips: number;
-  instrument: InstrumentSpec;
+  instrument: import("./instruments.js").InstrumentSpec;
+  /**
+   * Current market price of the instrument, in its quote currency. Required
+   * iff the instrument is `inverse`. See `pipValueInUsd` for semantics.
+   */
+  instrumentPrice?: number;
+  /**
+   * USD value of 1 unit of the instrument's quote currency, at the same
+   * timestamp as `instrumentPrice`. Required iff the instrument is `cross`.
+   */
+  quoteToUsdRate?: number;
   /** Smallest allowed lot increment. Default 0.01 (micro lot). */
   lotStep?: number;
   /** Minimum tradable lot size. Sizes below this are clamped to 0. Default 0.01. */
@@ -39,8 +60,17 @@ export interface PositionSizeResult {
   intendedRiskUsd: number;
   /** Actual USD at risk given the rounded lot size. Always ≤ intendedRiskUsd. */
   riskAmountUsd: number;
+  /** Resolved instrument category; matches `pipValueInUsd` for the same input. */
+  category: InstrumentCategory;
 }
 
+/**
+ * Thrown for non-finite / non-positive / out-of-domain values in any of
+ * `positionSize`'s own numeric inputs (balance, riskPercent, stopLossPips,
+ * lotStep, minLots, maxLots). Problems with `instrumentPrice` or
+ * `quoteToUsdRate` surface as `InvalidPipValueInputError` from the
+ * pip-value kernel instead.
+ */
 export class InvalidSizingInputError extends Error {
   constructor(message: string) {
     super(message);
@@ -48,28 +78,36 @@ export class InvalidSizingInputError extends Error {
   }
 }
 
-export class UnsupportedQuoteCurrencyError extends Error {
-  readonly quoteCurrency: string;
-  constructor(quoteCurrency: string) {
-    super(
-      `Position sizing v1 only supports USD-quoted instruments; got quote currency "${quoteCurrency}". ` +
-        `Non-USD quotes (crosses, USD/JPY, etc.) require a current price or cross rate and are planned for M1.`,
-    );
-    this.name = "UnsupportedQuoteCurrencyError";
-    this.quoteCurrency = quoteCurrency;
-  }
-}
-
 const DEFAULT_LOT_STEP = 0.01;
 const DEFAULT_MIN_LOTS = 0.01;
 const DEFAULT_MAX_LOTS = 100;
 
+/**
+ * Compute a risk-based lot size for a single position.
+ *
+ * Intended risk is `balance × riskPercent%`. Ideal lot size is
+ * `intendedRisk / (stopLossPips × pipValuePerLotUsd)`, where
+ * `pipValuePerLotUsd` comes from `pipValueInUsd` — so the caller must supply
+ * `instrumentPrice` (inverse) or `quoteToUsdRate` (cross) when those apply.
+ *
+ * The ideal size is then capped to `maxLots`, rounded DOWN to `lotStep`
+ * (never up — realised risk must not exceed intended risk), and snapped to
+ * zero if it falls below `minLots`. The returned `riskAmountUsd` reflects
+ * the final lot size, not the ideal one.
+ *
+ * Input errors fall into two classes: numeric problems with the sizing-
+ * layer inputs throw `InvalidSizingInputError`; numeric problems with the
+ * market rates consumed by `pipValueInUsd` throw
+ * `InvalidPipValueInputError` from that module, unchanged.
+ */
 export function positionSize(input: PositionSizeInput): PositionSizeResult {
   const {
     accountBalanceUsd,
     riskPercent,
     stopLossPips,
     instrument,
+    instrumentPrice,
+    quoteToUsdRate,
     lotStep = DEFAULT_LOT_STEP,
     minLots = DEFAULT_MIN_LOTS,
     maxLots = DEFAULT_MAX_LOTS,
@@ -93,11 +131,12 @@ export function positionSize(input: PositionSizeInput): PositionSizeResult {
     );
   }
 
-  if (instrument.quoteCurrency !== "USD") {
-    throw new UnsupportedQuoteCurrencyError(instrument.quoteCurrency);
-  }
+  const { pipValueUsd: pipValuePerLotUsd, category } = pipValueInUsd({
+    instrument,
+    ...(instrumentPrice !== undefined ? { instrumentPrice } : {}),
+    ...(quoteToUsdRate !== undefined ? { quoteToUsdRate } : {}),
+  });
 
-  const pipValuePerLotUsd = instrument.pipSize * instrument.contractSize;
   const intendedRiskUsd = accountBalanceUsd * (riskPercent / 100);
   const idealLots = intendedRiskUsd / (stopLossPips * pipValuePerLotUsd);
 
@@ -115,6 +154,7 @@ export function positionSize(input: PositionSizeInput): PositionSizeResult {
     pipValueUsd,
     intendedRiskUsd,
     riskAmountUsd,
+    category,
   };
 }
 
