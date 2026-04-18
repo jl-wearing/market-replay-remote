@@ -1,0 +1,54 @@
+---
+description: Hindsight project context — what it is, current state, where things live
+alwaysApply: true
+---
+
+# Hindsight
+
+A Windows desktop market-replay and paper-trading tool for FX, metals, and
+indices. Stack: Electron + React 19 + TypeScript (strict, ESM, NodeNext),
+Vitest for tests. Node ≥ 22 (staying on v22 for now; not moving to v24).
+Zero non-stdlib runtime deps so far.
+
+## Source-of-truth docs (read these before making architectural changes)
+
+- `ARCHITECTURE.md` — stack, layer boundaries, milestone roadmap.
+- `DEVELOPMENT.md` — TDD workflow, slice definition, DoD checklist,
+  commit-message format. Follow it literally.
+
+## Layout
+
+- `src/shared/` — pure, framework-free TypeScript (pip-value, sizing,
+  instruments, types). No I/O, no Electron, no React imports. This is
+  where most logic lives today.
+- `src/main/` — Electron main process (planned M2+).
+- `src/renderer/` — React UI (planned M3+).
+- `src/shared/*.test.ts` — co-located Vitest files. Tests live next to
+  the module they test.
+
+## Milestone state
+
+- **M0 — Foundations**: done. Instrument types, `positionSize` v1,
+  strict TS baseline, Vitest wired.
+- **M1 — Instrument catalog + category-aware sizing**: done
+  (commits `c4d56da`, `c31da4b`, `f6b787a`).
+  - `src/shared/pip-value.ts` — pure kernel for all three categories
+    (direct / inverse / cross).
+  - `src/shared/instruments.ts` — 18 instruments: FX majors, JPY pairs,
+    crosses (EURJPY/GBPJPY/AUDJPY/EURGBP/EURCHF), gold (XAUUSD),
+    silver (XAGUSD), indices (SPX500/NAS100/US30/GER40). Platinum and
+    palladium deliberately not in catalog.
+  - `src/shared/sizing.ts` — delegates pip-value to the kernel; returns
+    `category` on result; `UnsupportedQuoteCurrencyError` removed.
+- **M2 — Tick ingestion + replay** (next): Dukascopy bi5 loader, tick
+  store, replay clock. Not started.
+
+## Key conventions (short form — full text in DEVELOPMENT.md)
+
+- TDD: every slice is tests-first. Red → green → commit. Never commit
+  without confirming `npm test` and `npm run typecheck` are clean.
+- One slice per commit. Commit title: `<area>: <imperative summary>`
+  where `<area>` is a directory name under `src/` (or `docs`, `chore`).
+- `pipSize` in `instruments.ts` is the user-facing pip (what goes into
+  stop-loss entry), not the tick-feed precision. For XAGUSD they differ
+  — see the comment on that spec.

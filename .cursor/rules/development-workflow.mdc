@@ -1,0 +1,54 @@
+---
+description: TDD workflow, commit conventions, and Windows/PowerShell operational gotchas
+alwaysApply: true
+---
+
+# Workflow
+
+Full rules in `DEVELOPMENT.md`. What follows is the short form plus
+operational details that bite on Windows.
+
+## TDD slice loop (mandatory)
+
+1. Design note (1-2 paragraphs in the chat) before any code.
+2. Write tests in all four categories that apply: **core behaviour**,
+   **edge cases**, **breaking tests** (NaN/Infinity/zero/negative/
+   out-of-domain for every numeric & enum parameter), **invariants**
+   (property-style grids).
+3. Run tests — **confirm red for the right reason** before implementing.
+4. Implement the minimum to go green.
+5. Run `npm test` (all files) and `npm run typecheck`. Both must be clean.
+6. Walk the DoD checklist from `DEVELOPMENT.md` §3 explicitly.
+7. Commit (one slice = one commit).
+
+Do not merge steps 2 and 4. Do not commit without the DoD walk.
+
+## Commit message format
+
+- Title: `<area>: <imperative present-tense summary>`, lowercase area
+  matching a directory under `src/` (e.g. `shared`, `sizing`, `main`),
+  or `docs` / `chore` / `tests` for non-source changes.
+- Body: what changed and why, not how. Reference the slice in the
+  milestone roadmap if applicable.
+
+## PowerShell + git gotchas (this repo runs on Windows)
+
+- **No heredoc in `git commit -m`.** PowerShell parses `<<` as
+  redirection and fails. Write the message to a file (e.g.
+  `.git/COMMIT_EDITMSG_slice.txt`) with the Write tool, then
+  `git commit -F <path>`, then delete the file **sequentially** — not
+  in a parallel tool batch, or git will race the delete.
+- `ls -la` and `head` are not recognised. Use
+  `Get-ChildItem -Force | Select-Object ...` and `Select-Object -First N`
+  / `Select-Object -Last N` instead.
+- Use `Select-String -Pattern ...` (PowerShell native) or `rg` over
+  piping to `grep`.
+
+## Dependencies
+
+- No new runtime dependencies without discussing scope first. M0 and M1
+  shipped zero non-stdlib runtime deps; keep it that way through M2 if
+  at all possible.
+- Dev deps (Vitest, TypeScript, `@types/node`) stay pinned to major
+  versions compatible with Node 22. Do **not** bump `@types/node` past
+  `^22` while the runtime stays on Node 22.
