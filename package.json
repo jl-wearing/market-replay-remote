@@ -1,0 +1,22 @@
+{
+  "name": "hindsight",
+  "version": "0.0.1",
+  "private": true,
+  "description": "A desktop market replay and paper trading tool for forex, metals, and indices.",
+  "author": "",
+  "license": "UNLICENSED",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.4"
+  }
+}
