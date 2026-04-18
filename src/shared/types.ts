@@ -31,3 +31,44 @@ export interface Tick {
   /** Ask-side volume as published by the feed (Dukascopy: millions of base). */
   volumeAsk: number;
 }
+
+/**
+ * OHLCV bar at a single timeframe, with bid and ask tracked independently.
+ *
+ * Each side carries its own open/high/low/close so that the paper broker
+ * (M6) can fill buys at the ask and sells at the bid without having to
+ * re-synthesise a side from a mid price. Volumes are kept per-side for the
+ * same "don't discard reconstructible info" reason.
+ *
+ * Bars form a sparse series: a second with zero ticks produces no bar.
+ * Downstream code (chart, replay) is responsible for its own gap policy.
+ */
+export interface Bar {
+  /**
+   * Absolute epoch milliseconds at the top of the bar's bucket. For a 1 s
+   * bar produced by `ticksToSecondBars`, this is a multiple of 1000.
+   */
+  timestampMs: number;
+  /** Open bid — first tick's bid in the bar's bucket. */
+  oBid: number;
+  /** High bid — max tick bid in the bar's bucket. */
+  hBid: number;
+  /** Low bid — min tick bid in the bar's bucket. */
+  lBid: number;
+  /** Close bid — last tick's bid in the bar's bucket. */
+  cBid: number;
+  /** Open ask — first tick's ask in the bar's bucket. */
+  oAsk: number;
+  /** High ask — max tick ask in the bar's bucket. */
+  hAsk: number;
+  /** Low ask — min tick ask in the bar's bucket. */
+  lAsk: number;
+  /** Close ask — last tick's ask in the bar's bucket. */
+  cAsk: number;
+  /** Sum of bid-side tick volumes in the bar's bucket. >= 0. */
+  volumeBid: number;
+  /** Sum of ask-side tick volumes in the bar's bucket. >= 0. */
+  volumeAsk: number;
+  /** Number of ticks that contributed to this bar. >= 1 for emitted bars. */
+  tickCount: number;
+}
