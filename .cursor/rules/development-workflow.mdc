@@ -46,9 +46,32 @@ Do not merge steps 2 and 4. Do not commit without the DoD walk.
 
 ## Dependencies
 
-- No new runtime dependencies without discussing scope first. M0 and M1
-  shipped zero non-stdlib runtime deps; keep it that way through M2 if
-  at all possible.
+- No new runtime dependencies without discussing scope first. M0, M1,
+  and M2 slices 1–4a all shipped with zero non-stdlib runtime deps.
+  Approved upcoming adds (each in its own slice/commit, alongside an
+  `ARCHITECTURE.md` "Technology stack" table update):
+  - M2 slice 4b: `dukascopy-node` (Dukascopy URL layout + holiday
+    calendar; we still own bi5 parsing in `shared/dukascopy/bi5.ts`).
+  - M2 slice 6: `duckdb` (Parquet read + 1 s → arbitrary TF aggregation).
+  - Pure-JS `lzma` deliberately *not* taken — `dukascopy-node` handles
+    LZMA internally, and a second native module surface isn't worth it
+    on the offline-only ingest path.
 - Dev deps (Vitest, TypeScript, `@types/node`) stay pinned to major
   versions compatible with Node 22. Do **not** bump `@types/node` past
   `^22` while the runtime stays on Node 22.
+
+## I/O adapter seam pattern (M2 onward)
+
+When introducing an I/O-bound module (filesystem, DuckDB, Dukascopy,
+…), put the seam at the **library boundary**, not below it:
+
+- Define a small `interface XClient { … }` in the adapter file.
+- Export a `createXClient(opts)` factory that returns the real
+  implementation wrapping the third-party library.
+- Unit tests inject a hand-written fake `XClient` with canned
+  responses. They do **not** mock HTTP / fs underneath the library.
+- Real-library exercise lives in a separate `*.@network.test.ts`-style
+  file that is opt-in (off by default in `npm test`).
+
+Rationale: faking below the library means re-implementing its URL
+layout / file format / quirks, which defeats the point of using it.

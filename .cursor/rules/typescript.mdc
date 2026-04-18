@@ -33,13 +33,35 @@ Respect all of these — do not silence by widening types or adding
 ## Errors and input validation
 
 - Each module owns a named error class (e.g. `InvalidSizingInputError`,
-  `InvalidPipValueInputError`). Don't throw bare `Error` for user-input
+  `InvalidPipValueInputError`, `InvalidBi5Error`,
+  `InvalidTickStreamError`, `InvalidStoragePathError`,
+  `UnmappedSymbolError`). Don't throw bare `Error` for user-input
   failures.
 - For every numeric parameter, a breaking test must cover NaN, Infinity,
   zero, negative, and any out-of-domain value (e.g. `riskPercent > 100`).
   The implementation must throw the module's error class for each case.
+- **Strict input rejection.** Don't silently normalise wrong-shape
+  inputs (e.g. lowercase a symbol that should be uppercase, coerce a
+  number-shaped string). Throw the module's error class. Surfacing a
+  bug at the call site is worth more than the convenience of coercion.
 - Prefer pure, synchronous kernels for math. Callers in higher layers
   pass prices / rates in; kernels do no I/O.
+
+## Branded types for cross-module string contracts
+
+When a string flows from a validator through several layers and the
+intermediate layers should not be allowed to forge their own values
+(e.g. `DukascopySymbol` in `shared/dukascopy/symbolMap.ts`):
+
+- Declare `export type X = string & { readonly __brand: "X" };`.
+- Have exactly one validator function return values of that type.
+- Downstream APIs accept `X`, never `string`. The compiler then
+  guarantees every value of `X` came through the validator.
+
+The brand is a phantom property — zero runtime cost. Use sparingly:
+only where the compile-time guarantee is doing real work (typically
+at the boundary between layers or modules with different naming
+conventions).
 
 ## `src/shared/` additional rule
 

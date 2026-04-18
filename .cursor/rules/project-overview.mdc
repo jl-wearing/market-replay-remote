@@ -8,7 +8,8 @@ alwaysApply: true
 A Windows desktop market-replay and paper-trading tool for FX, metals, and
 indices. Stack: Electron + React 19 + TypeScript (strict, ESM, NodeNext),
 Vitest for tests. Node ≥ 22 (staying on v22 for now; not moving to v24).
-Zero non-stdlib runtime deps so far.
+Zero non-stdlib runtime deps so far — the next planned add is
+`dukascopy-node` in M2 slice 4b.
 
 ## Source-of-truth docs (read these before making architectural changes)
 
@@ -18,13 +19,19 @@ Zero non-stdlib runtime deps so far.
 
 ## Layout
 
-- `src/shared/` — pure, framework-free TypeScript (pip-value, sizing,
-  instruments, types). No I/O, no Electron, no React imports. This is
-  where most logic lives today.
-- `src/main/` — Electron main process (planned M2+).
+- `src/shared/` — pure, framework-free TypeScript. No I/O, no Electron,
+  no React imports. This is where most logic lives today. Subdirs:
+  - `src/shared/` (root) — `instruments.ts`, `pip-value.ts`,
+    `sizing.ts`, `types.ts` (`Tick`, `Bar`).
+  - `src/shared/bars/` — `aggregate.ts` (ticks → 1 s OHLCV).
+  - `src/shared/dukascopy/` — `bi5.ts` (tick decoder), `symbolMap.ts`
+    (catalog → Dukascopy identifier, branded `DukascopySymbol`).
+  - `src/shared/storage/` — `paths.ts` (POSIX path helpers for the
+    tick + bar layout from `ARCHITECTURE.md`).
+- `src/main/` — Electron main process. M2 slice 4b will add
+  `src/main/data/dukascopyClient.ts` (the first I/O adapter).
 - `src/renderer/` — React UI (planned M3+).
-- `src/shared/*.test.ts` — co-located Vitest files. Tests live next to
-  the module they test.
+- Tests live co-located: `<module>.test.ts` next to `<module>.ts`.
 
 ## Milestone state
 
@@ -34,14 +41,37 @@ Zero non-stdlib runtime deps so far.
   (commits `c4d56da`, `c31da4b`, `f6b787a`).
   - `src/shared/pip-value.ts` — pure kernel for all three categories
     (direct / inverse / cross).
-  - `src/shared/instruments.ts` — 18 instruments: FX majors, JPY pairs,
+  - `src/shared/instruments.ts` — 17 instruments: FX majors, JPY pairs,
     crosses (EURJPY/GBPJPY/AUDJPY/EURGBP/EURCHF), gold (XAUUSD),
     silver (XAGUSD), indices (SPX500/NAS100/US30/GER40). Platinum and
     palladium deliberately not in catalog.
   - `src/shared/sizing.ts` — delegates pip-value to the kernel; returns
     `category` on result; `UnsupportedQuoteCurrencyError` removed.
-- **M2 — Tick ingestion + replay** (next): Dukascopy bi5 loader, tick
-  store, replay clock. Not started.
+- **M2 — Data ingest** (in progress): Dukascopy fetch → bi5 decode →
+  1 s bars → DuckDB-queryable Parquet store. Pure half is done; the
+  I/O half is next.
+  - **Slice 1 done** (`875d214`): `src/shared/dukascopy/bi5.ts` —
+    pure 20-byte big-endian tick-record decoder. Bid/ask/bidVol/askVol.
+  - **Slice 2 done** (`c056920`): `src/shared/bars/aggregate.ts` —
+    pure tick→1s OHLCV aggregator. Bid and ask O/H/L/C tracked
+    separately; volumes per-side; sparse output (no empty-second bars).
+  - **Slice 3 done** (`3a791ee`): `src/shared/storage/paths.ts` —
+    pure POSIX path helpers for the tick + bar layout. Strict
+    `[A-Z0-9]+` symbol pattern, 1-indexed months.
+  - **Slice 4a done** (`de1bcc8`): `src/shared/dukascopy/symbolMap.ts`
+    — catalog→Dukascopy mapping for all 17 instruments, with branded
+    `DukascopySymbol` so the fetcher's input is compile-time-safe.
+  - **Slice 4b next**: `src/main/data/dukascopyClient.ts` — adapter
+    around `dukascopy-node` (first runtime dep). Seam at the
+    `DukascopyClient` interface (canned-response fake in unit tests),
+    real client in a `@network`-tagged opt-in integration test.
+  - **Slice 5**: ingest orchestrator (pure over adapters).
+  - **Slice 6**: DuckDB bar store (adds `duckdb` runtime dep).
+  - **Slice 7**: end-to-end smoke test / CLI entry.
+- **M3+** (replay engine, paper broker, charts, UI): not started.
+
+Test count after M2/4a: 204 across 7 files. `npm test` and
+`npm run typecheck` are both clean at HEAD.
 
 ## Key conventions (short form — full text in DEVELOPMENT.md)
 
