@@ -1,8 +1,11 @@
 /**
  * Instrument metadata needed for sizing, fills, and display.
  *
- * v1 only exercises USD-quoted instruments. Non-USD quotes are modelled here
- * so the catalog can grow, but the sizing module rejects them until M1.
+ * The catalog covers all three pricing categories Hindsight will trade
+ * (direct, inverse, cross — see `InstrumentCategory` below). Sizing and
+ * pip-value math branch on the category, not on asset class, so adding
+ * further instruments is data-only as long as their base/quote currencies
+ * are understood.
  */
 
 export type AssetClass =
@@ -43,10 +46,19 @@ export interface InstrumentSpec {
 }
 
 /**
- * v1 catalog: USD-quoted only. More instruments join at M1 once sizing
- * supports non-USD quotes and cross-rate conversion.
+ * Hindsight's instrument catalog.
+ *
+ * Grouped by pricing category (direct / inverse / cross) rather than asset
+ * class, because pip-value and sizing math branch on the category.
+ *
+ * Note on `pipSize` vs tick-feed precision: `pipSize` here is the unit a
+ * user enters stops in, not the smallest price increment Dukascopy publishes.
+ * For most instruments the two coincide; for XAGUSD they deliberately do not
+ * (see the comment on that entry). The tick-feed precision will be tracked
+ * separately in the data layer once it lands (M2).
  */
 export const INSTRUMENTS: Readonly<Record<string, InstrumentSpec>> = Object.freeze({
+  // ── direct (quote = USD) ───────────────────────────────────────────────
   EURUSD: {
     symbol: "EURUSD",
     displayName: "EUR / USD",
@@ -93,6 +105,11 @@ export const INSTRUMENTS: Readonly<Record<string, InstrumentSpec>> = Object.free
     pipSize: 0.01,
   },
   XAGUSD: {
+    // Dukascopy quotes XAGUSD to 4 decimals on the tick feed (tick step
+    // 0.0001), but the user-facing pip for stop-loss entry is 0.001 per
+    // MT4 convention, giving $5/pip at 1 standard lot (0.001 × 5000 oz).
+    // `pipSize` here is the pip unit; tick-feed precision belongs to the
+    // data layer (M2) and does not change sizing math.
     symbol: "XAGUSD",
     displayName: "Silver / USD",
     assetClass: "metal",
@@ -125,6 +142,95 @@ export const INSTRUMENTS: Readonly<Record<string, InstrumentSpec>> = Object.free
     assetClass: "index",
     baseCurrency: "USD",
     quoteCurrency: "USD",
+    contractSize: 1,
+    pipSize: 1,
+  },
+
+  // ── inverse (base = USD, quote ≠ USD) ──────────────────────────────────
+  USDJPY: {
+    symbol: "USDJPY",
+    displayName: "USD / JPY",
+    assetClass: "forex",
+    baseCurrency: "USD",
+    quoteCurrency: "JPY",
+    contractSize: 100_000,
+    pipSize: 0.01,
+  },
+  USDCHF: {
+    symbol: "USDCHF",
+    displayName: "USD / CHF",
+    assetClass: "forex",
+    baseCurrency: "USD",
+    quoteCurrency: "CHF",
+    contractSize: 100_000,
+    pipSize: 0.0001,
+  },
+  USDCAD: {
+    symbol: "USDCAD",
+    displayName: "USD / CAD",
+    assetClass: "forex",
+    baseCurrency: "USD",
+    quoteCurrency: "CAD",
+    contractSize: 100_000,
+    pipSize: 0.0001,
+  },
+
+  // ── cross (neither base nor quote is USD) ──────────────────────────────
+  EURJPY: {
+    symbol: "EURJPY",
+    displayName: "EUR / JPY",
+    assetClass: "forex",
+    baseCurrency: "EUR",
+    quoteCurrency: "JPY",
+    contractSize: 100_000,
+    pipSize: 0.01,
+  },
+  GBPJPY: {
+    symbol: "GBPJPY",
+    displayName: "GBP / JPY",
+    assetClass: "forex",
+    baseCurrency: "GBP",
+    quoteCurrency: "JPY",
+    contractSize: 100_000,
+    pipSize: 0.01,
+  },
+  AUDJPY: {
+    symbol: "AUDJPY",
+    displayName: "AUD / JPY",
+    assetClass: "forex",
+    baseCurrency: "AUD",
+    quoteCurrency: "JPY",
+    contractSize: 100_000,
+    pipSize: 0.01,
+  },
+  EURGBP: {
+    symbol: "EURGBP",
+    displayName: "EUR / GBP",
+    assetClass: "forex",
+    baseCurrency: "EUR",
+    quoteCurrency: "GBP",
+    contractSize: 100_000,
+    pipSize: 0.0001,
+  },
+  EURCHF: {
+    symbol: "EURCHF",
+    displayName: "EUR / CHF",
+    assetClass: "forex",
+    baseCurrency: "EUR",
+    quoteCurrency: "CHF",
+    contractSize: 100_000,
+    pipSize: 0.0001,
+  },
+  GER40: {
+    // DAX index CFD. Dukascopy symbol DEU.IDX/EUR; we store the
+    // user-friendly GER40 name here and map Dukascopy symbols at M2.
+    // Quote currency is EUR, so USD pip value needs an EURUSD conversion
+    // supplied by the caller (category: cross).
+    symbol: "GER40",
+    displayName: "DAX (Germany 40) CFD",
+    assetClass: "index",
+    baseCurrency: "EUR",
+    quoteCurrency: "EUR",
     contractSize: 1,
     pipSize: 1,
   },

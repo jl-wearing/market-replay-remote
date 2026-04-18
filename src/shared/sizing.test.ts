@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { INSTRUMENTS, getInstrument } from "./instruments.js";
+import { getInstrument } from "./instruments.js";
 import {
   InvalidSizingInputError,
   UnsupportedQuoteCurrencyError,
@@ -318,9 +318,4 @@ describe("positionSize — invariants (property-style)", () => {
     }
   });
 
-  it("the v1 catalog contains only USD-quoted instruments", () => {
-    for (const spec of Object.values(INSTRUMENTS)) {
-      expect(spec.quoteCurrency).toBe("USD");
-    }
-  });
 });
