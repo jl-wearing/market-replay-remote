@@ -146,3 +146,23 @@ export class UnknownInstrumentError extends Error {
     this.symbol = symbol;
   }
 }
+
+/**
+ * Pricing category used for pip-value and sizing math. Determined entirely
+ * by an instrument's base and quote currencies:
+ *
+ * - `direct`  — quote currency is USD (EURUSD, XAUUSD, SPX500, …). The USD
+ *   pip value is constant; no market price needed.
+ * - `inverse` — base currency is USD and quote currency is not (USDJPY,
+ *   USDCHF, USDCAD). USD pip value depends on the instrument's own price.
+ * - `cross`   — neither base nor quote is USD (EURJPY, EURGBP, GER40, …).
+ *   USD pip value depends on a separate quote-currency → USD conversion
+ *   rate; the instrument's own price does not enter the pip-value formula.
+ */
+export type InstrumentCategory = "direct" | "inverse" | "cross";
+
+export function instrumentCategory(spec: InstrumentSpec): InstrumentCategory {
+  if (spec.quoteCurrency === "USD") return "direct";
+  if (spec.baseCurrency === "USD") return "inverse";
+  return "cross";
+}
