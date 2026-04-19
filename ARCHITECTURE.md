@@ -31,7 +31,8 @@ Versions below are the current stable lines as of the latest architecture review
 | State | Zustand | 5.x | Small, no boilerplate. |
 | UI primitives | Radix UI | latest | Accessible, unstyled primitives we theme ourselves. |
 | Styling | Tailwind CSS | 4.x | Zero-config, works well with Vite 8. |
-| Market data ingest | [`dukascopy-node`](https://github.com/Leo4815162342/dukascopy-node) | latest | The established Dukascopy downloader. |
+| Market data ingest | [`dukascopy-node`](https://github.com/Leo4815162342/dukascopy-node) | 1.46.x | Used for the Dukascopy URL scheme + holiday/availability calendar. We own the bi5 record decoder in `src/shared/dukascopy/bi5.ts` and call native `fetch` (Node ≥ 22) directly so the network seam stays inside our adapter. |
+| LZMA decompression | [`lzma`](https://github.com/nmrugg/LZMA-JS) | 2.3.x | Pure-JS LZMA1 decoder for `.bi5` payloads. Pure-JS over `lzma-native` to avoid a second native-module rebuild surface alongside DuckDB; the bi5 decode runs once per ingest, offline, so the ~2–3× pure-JS slowdown is invisible next to disk + network. |
 | Market data store | DuckDB + Parquet files | DuckDB 1.x | Columnar, fast analytic queries, per-symbol per-year files. |
 | App data store | better-sqlite3 | latest matching Electron's Node | Transactional, great for trades/journal/settings. |
 | Test runner | Vitest | 4.x | Fast, native TS, ESM-first. |

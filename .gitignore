@@ -23,7 +23,10 @@ desktop.ini
 !.vscode/extensions.json
 !.vscode/settings.json
 
-data/
+# Per-extension patterns below cover the actual data the app writes
+# (Hindsight's runtime data lives in %APPDATA%/Hindsight/data/, never inside
+# the repo). A bare `data/` rule was previously here but it also matched
+# `src/main/data/`, which is real source code (the data adapters live there).
 *.bi5
 *.parquet
 *.duckdb
