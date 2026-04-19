@@ -68,10 +68,42 @@ When introducing an I/O-bound module (filesystem, DuckDB, Dukascopy,
 - Define a small `interface XClient { … }` in the adapter file.
 - Export a `createXClient(opts)` factory that returns the real
   implementation wrapping the third-party library.
-- Unit tests inject a hand-written fake `XClient` with canned
-  responses. They do **not** mock HTTP / fs underneath the library.
-- Real-library exercise lives in a separate `*.@network.test.ts`-style
-  file that is opt-in (off by default in `npm test`).
+- Consumers of `XClient` (the orchestrator) unit-test themselves by
+  injecting a hand-written fake `XClient` with canned responses. They
+  do **not** mock HTTP / fs underneath the library.
+- The adapter's own unit tests (`<adapter>.test.ts`) fake the
+  adapter's direct dependencies (`fetch`, `lzma.decompress`, …) — one
+  layer below `XClient`, one layer above the third-party library. See
+  `src/main/data/dukascopyClient.test.ts`.
+- Real-library exercise lives in a separate `<adapter>.network.test.ts`
+  file gated by an env var (`HINDSIGHT_RUN_NETWORK=1`) and skipped by
+  default in `npm test`.
 
 Rationale: faking below the library means re-implementing its URL
 layout / file format / quirks, which defeats the point of using it.
+
+## Integration tests
+
+An integration test exercises **two or more real production modules
+together**, with no inter-module mocks. File pattern:
+`<orchestrator>.integration.test.ts`, co-located with the higher-level
+module of the pair. Picked up by the default `src/**/*.test.ts` glob,
+so they run in `npm test` like unit tests.
+
+Two flavours, both following the same four-block layout as unit tests:
+
+- **Pure-composition** — both modules are pure (no I/O). Pin
+  cross-module contracts (data shapes, error ownership, boundary
+  semantics). Example: `src/shared/bars/aggregate.integration.test.ts`
+  composes `decodeBi5Records` and `ticksToSecondBars`, asserting
+  bi5-layer parse errors stay `InvalidBi5Error` (never reframed),
+  bi5's lax ordering is rejected by aggregate, inverted-spread
+  artefacts round-trip untouched.
+- **I/O-bound** — at least one module touches the filesystem, SQLite,
+  DuckDB, Parquet, or a child process. Use
+  `fs.mkdtempSync(path.join(os.tmpdir(), "hindsight-"))` per test,
+  clean in `afterEach`, never share a tmpdir, never mock `fs` /
+  `sqlite` / `duckdb`.
+
+Network tests (`<adapter>.network.test.ts`) are a separate, opt-in
+category — see the seam pattern above.

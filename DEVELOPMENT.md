@@ -69,7 +69,7 @@ A slice's test file has **four categories**, each as its own `describe` block. U
 
 **Breaking tests are not optional.** Half of the real defects in a trading tool are "the system did something it should have refused to do" — oversized lots, trades during a halted market, indicator reading bars past the replay cursor. Every slice writes down in executable form what it refuses to do.
 
-**Integration tests** live alongside unit tests, in the same test file or a sibling `foo.integration.test.ts`, whenever the slice crosses a real boundary (filesystem, SQLite, DuckDB, Parquet, child process). They use real I/O into a `tmpdir` — no mocks of the filesystem. See §4.
+**Integration tests** live alongside unit tests, in a sibling `<orchestrator>.integration.test.ts` co-located with the higher-level module of the pair. They cover two cases: (1) **pure-composition** — two or more pure modules wired together with no I/O, to pin the cross-module contract (data shapes, error ownership, boundary semantics); and (2) **I/O-bound** — at least one module touches the filesystem, SQLite, DuckDB, Parquet, or a child process, using real I/O into a `tmpdir` (never `fs` mocks). Both flavours run in `npm test`. See §3 "Integration tests" and §4.
 
 Example of what a good test file looks like today: [`src/shared/sizing.test.ts`](./src/shared/sizing.test.ts). Note the four blocks, the hand-computed numbers (not `toMatchSnapshot`), and the property sweep at the bottom.
 
@@ -121,10 +121,16 @@ Anything unchecked → not mergeable.
 
 ### Integration tests
 
-- Any slice that touches the filesystem, SQLite, DuckDB, Parquet, or spawns `dukascopy-node` has integration tests.
-- Use `fs.mkdtempSync(path.join(os.tmpdir(), "hindsight-"))` per test, clean it in `afterEach`. Never share a tmpdir between tests.
-- Never mock `fs`, `sqlite`, or `duckdb`. Use real instances against tmpdirs. These tools are fast and mocks drift from reality.
-- External network calls (Dukascopy) are behind an adapter interface; integration tests use a canned-response fake of the adapter, not real HTTP. A separate, opt-in test (`npm test -- --run -t "@network"`, or similar gating) hits the real network; it's informational and never required green for merge.
+An integration test exercises **two or more real production modules together**, with no inter-module mocks. File pattern: `<orchestrator>.integration.test.ts`, co-located with the higher-level module of the pair (the one closer to the consumer). Picked up by the default `src/**/*.test.ts` Vitest glob, so they run in `npm test` like unit tests.
+
+Two flavours:
+
+- **Pure-composition integration tests.** Both modules are pure — no fs, no network, no child processes. The point is to pin the cross-module *contract*: tick / bar shape, unit conventions, who owns which error class, what each layer rejects vs. accepts. Example: `src/shared/bars/aggregate.integration.test.ts` composes `decodeBi5Records` and `ticksToSecondBars` over hand-crafted bi5 byte buffers and asserts that bi5-layer parse errors surface as `InvalidBi5Error` (never reframed to `InvalidTickStreamError`), that bi5's lax ordering is rejected by aggregate, and that data-quality artefacts (inverted spread) round-trip untouched.
+- **I/O-bound integration tests.** At least one module touches the filesystem, SQLite, DuckDB, Parquet, or a child process. Use `fs.mkdtempSync(path.join(os.tmpdir(), "hindsight-"))` per test, clean it in `afterEach`. Never share a tmpdir between tests. Never mock `fs`, `sqlite`, or `duckdb` — use real instances against tmpdirs. These tools are fast and mocks drift from reality.
+
+Both flavours follow the same four-block (`core behaviour` / `edge cases` / `breaking tests` / `invariants`) layout as unit tests.
+
+**Network tests are a separate category, not an integration variant.** External network calls (Dukascopy) are behind an adapter interface; the orchestrator's integration tests use a canned-response fake of the adapter, not real HTTP. A separate, opt-in `<module>.network.test.ts` hits the real network — gated by an env var (currently `HINDSIGHT_RUN_NETWORK=1`, see `dukascopyClient.network.test.ts`) and skipped by default in `npm test`. It's informational and never required green for merge.
 
 ### Invariant / property tests
 
@@ -140,15 +146,17 @@ Pure logic lives in `src/shared/` and is unit-testable synchronously. Anything t
 
 ```
 src/main/data/
-├── dukascopy.ts              ← DukascopyClient interface + real impl
-├── dukascopy.test.ts         ← tests the real impl against a local fixture server (integration)
-├── downloader.ts             ← orchestrator: takes a DukascopyClient
-└── downloader.test.ts        ← tests orchestrator with a FakeDukascopyClient (unit)
+├── dukascopyClient.ts                ← DukascopyClient interface + createDukascopyClient (real impl)
+├── dukascopyClient.test.ts           ← unit: hand-rolled fakes for `fetch` and `lzma.decompress`
+├── dukascopyClient.network.test.ts   ← opt-in (HINDSIGHT_RUN_NETWORK=1): hits the real datafeed
+├── ingest.ts                         ← orchestrator (M2 slice 5): takes a DukascopyClient
+├── ingest.test.ts                    ← unit: hand-rolled FakeDukascopyClient with canned bytes
+└── ingest.integration.test.ts        ← I/O-bound: real DuckDB / Parquet store in a tmpdir, FakeDukascopyClient for the network seam
 ```
 
-The orchestrator never `import`s the real client directly — it takes it as a constructor argument or factory. This makes the orchestrator's unit tests trivial and the real client's integration tests focused on the wire protocol only.
+The orchestrator never `import`s the real client directly — it takes it as a constructor argument or factory. This keeps the orchestrator's unit tests trivial and lets the real client's tests focus on its own wiring (URL composition, status codes, decompression) without the orchestrator on top.
 
-Rule of thumb: **if a module has both I/O and logic, split it.** The logic half gets unit tests with a fake; the I/O half gets integration tests against a real instance in a tmpdir.
+Rule of thumb: **if a module has both I/O and logic, split it.** The logic half gets unit tests with a fake; the I/O half gets a unit test that fakes its direct dependencies (where the seam is between the module and a third-party library, fake the library's direct callers — `fetch`, `lzma.decompress` — not the library), an opt-in `network.test.ts` against the real third party, and an integration test against a real instance in a tmpdir for the orchestrator that consumes it.
 
 ---
 

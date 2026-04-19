@@ -8,8 +8,9 @@ alwaysApply: true
 A Windows desktop market-replay and paper-trading tool for FX, metals, and
 indices. Stack: Electron + React 19 + TypeScript (strict, ESM, NodeNext),
 Vitest for tests. Node ≥ 22 (staying on v22 for now; not moving to v24).
-Zero non-stdlib runtime deps so far — the next planned add is
-`dukascopy-node` in M2 slice 4b.
+Runtime deps so far: `dukascopy-node` (URL layout for the datafeed) and
+`lzma` (pure-JS LZMA1 decompressor for `.bi5`), both added in M2 slice
+4b. Next runtime add is `duckdb` in M2 slice 6.
 
 ## Source-of-truth docs (read these before making architectural changes)
 
@@ -28,8 +29,8 @@ Zero non-stdlib runtime deps so far — the next planned add is
     (catalog → Dukascopy identifier, branded `DukascopySymbol`).
   - `src/shared/storage/` — `paths.ts` (POSIX path helpers for the
     tick + bar layout from `ARCHITECTURE.md`).
-- `src/main/` — Electron main process. M2 slice 4b will add
-  `src/main/data/dukascopyClient.ts` (the first I/O adapter).
+- `src/main/` — Electron main process. Currently just
+  `src/main/data/dukascopyClient.ts` (the first I/O adapter, M2 slice 4b).
 - `src/renderer/` — React UI (planned M3+).
 - Tests live co-located: `<module>.test.ts` next to `<module>.ts`.
 
@@ -61,17 +62,28 @@ Zero non-stdlib runtime deps so far — the next planned add is
   - **Slice 4a done** (`de1bcc8`): `src/shared/dukascopy/symbolMap.ts`
     — catalog→Dukascopy mapping for all 17 instruments, with branded
     `DukascopySymbol` so the fetcher's input is compile-time-safe.
-  - **Slice 4b next**: `src/main/data/dukascopyClient.ts` — adapter
-    around `dukascopy-node` (first runtime dep). Seam at the
-    `DukascopyClient` interface (canned-response fake in unit tests),
-    real client in a `@network`-tagged opt-in integration test.
-  - **Slice 5**: ingest orchestrator (pure over adapters).
+  - **Slice 4b done** (`e0f96d0`): `src/main/data/dukascopyClient.ts`
+    — adapter wrapping `dukascopy-node` (URL layout) + native `fetch`
+    + pure-JS `lzma`. Seam at the `DukascopyClient` interface;
+    `fetchHour({ symbol, hourStartMs })` returns the LZMA-decompressed
+    bi5 bytes. The adapter's own unit tests fake `fetch` and
+    `lzma.decompress` (one layer below `DukascopyClient`); the real
+    datafeed is exercised in `dukascopyClient.network.test.ts`,
+    opt-in via `HINDSIGHT_RUN_NETWORK=1`.
+  - **Integration-test category** introduced alongside slice 4b:
+    `aggregate.integration.test.ts` composes
+    `decodeBi5Records → ticksToSecondBars` over hand-crafted bi5 bytes
+    to pin the cross-module contract. Convention documented in
+    `DEVELOPMENT.md` §3 and the workflow rule.
+  - **Slice 5 next**: `src/main/data/ingest.ts` — ingest orchestrator
+    (takes `DukascopyClient`, walks (symbol × hour) ranges, decodes,
+    aggregates, hands bars to a bar-store interface that's stubbed
+    until slice 6).
   - **Slice 6**: DuckDB bar store (adds `duckdb` runtime dep).
   - **Slice 7**: end-to-end smoke test / CLI entry.
 - **M3+** (replay engine, paper broker, charts, UI): not started.
 
-Test count after M2/4a: 204 across 7 files. `npm test` and
-`npm run typecheck` are both clean at HEAD.
+`npm test` and `npm run typecheck` are both clean at HEAD.
 
 ## Key conventions (short form — full text in DEVELOPMENT.md)
 
