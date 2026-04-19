@@ -48,14 +48,21 @@ Do not merge steps 2 and 4. Do not commit without the DoD walk.
 
 - No new runtime dependencies without discussing scope first. M0, M1,
   and M2 slices 1–4a all shipped with zero non-stdlib runtime deps.
-  Approved upcoming adds (each in its own slice/commit, alongside an
-  `ARCHITECTURE.md` "Technology stack" table update):
-  - M2 slice 4b: `dukascopy-node` (Dukascopy URL layout + holiday
-    calendar; we still own bi5 parsing in `shared/dukascopy/bi5.ts`).
+  Each runtime add lands in its own slice/commit alongside an
+  `ARCHITECTURE.md` "Technology stack" table update.
+- Runtime deps in tree today (all added in M2 slice 4b, `e0f96d0`):
+  - `dukascopy-node` — Dukascopy URL layout + holiday calendar +
+    `instrumentMetaData` (per-instrument decimal factors, consumed by
+    `src/main/data/priceScale.ts`). We still own bi5 parsing in
+    `src/shared/dukascopy/bi5.ts`.
+  - `lzma` (NMrocks pure-JS LZMA1) + `@types/lzma` — used directly by
+    `dukascopyClient.ts` to decompress `.bi5` payloads. Earlier plan
+    was to defer LZMA to `dukascopy-node`'s own pipeline, but slice 4b
+    bypassed that pipeline (we call `fetch` directly to avoid pulling
+    in its disk-cache + queue stack), so the decompressor became part
+    of our adapter. Pure-JS, no native module.
+- Approved upcoming adds:
   - M2 slice 6: `duckdb` (Parquet read + 1 s → arbitrary TF aggregation).
-  - Pure-JS `lzma` deliberately *not* taken — `dukascopy-node` handles
-    LZMA internally, and a second native module surface isn't worth it
-    on the offline-only ingest path.
 - Dev deps (Vitest, TypeScript, `@types/node`) stay pinned to major
   versions compatible with Node 22. Do **not** bump `@types/node` past
   `^22` while the runtime stays on Node 22.
@@ -92,18 +99,29 @@ so they run in `npm test` like unit tests.
 
 Two flavours, both following the same four-block layout as unit tests:
 
-- **Pure-composition** — both modules are pure (no I/O). Pin
+- **Pure-composition** — every module under test is pure (no I/O). Pin
   cross-module contracts (data shapes, error ownership, boundary
-  semantics). Example: `src/shared/bars/aggregate.integration.test.ts`
-  composes `decodeBi5Records` and `ticksToSecondBars`, asserting
-  bi5-layer parse errors stay `InvalidBi5Error` (never reframed),
-  bi5's lax ordering is rejected by aggregate, inverted-spread
-  artefacts round-trip untouched.
+  semantics). Examples:
+  - `src/shared/bars/aggregate.integration.test.ts` composes
+    `decodeBi5Records` and `ticksToSecondBars`, asserting bi5-layer
+    parse errors stay `InvalidBi5Error` (never reframed), bi5's lax
+    ordering is rejected by aggregate, inverted-spread artefacts
+    round-trip untouched.
+  - `src/main/data/ingest.integration.test.ts` composes the real
+    ingest orchestrator with real bi5/aggregate over hand-crafted
+    bytes, hand-rolled fake `DukascopyClient` and `BarStore`. It
+    pins data-flow regressions the unit suite would not catch — most
+    importantly that the right `priceScale` is threaded through per
+    symbol (EURUSD 1e5 vs USDJPY/XAUUSD 1e3), since a wrong scale
+    produces silently wrong prices instead of throwing. "Pure
+    composition" stretches a touch here (the orchestrator is the
+    `await` point), but no real I/O happens — the test runs offline
+    and deterministically — so the same convention applies.
 - **I/O-bound** — at least one module touches the filesystem, SQLite,
   DuckDB, Parquet, or a child process. Use
   `fs.mkdtempSync(path.join(os.tmpdir(), "hindsight-"))` per test,
   clean in `afterEach`, never share a tmpdir, never mock `fs` /
-  `sqlite` / `duckdb`.
+  `sqlite` / `duckdb`. None landed yet — slice 6 will be the first.
 
 Network tests (`<adapter>.network.test.ts`) are a separate, opt-in
 category — see the seam pattern above.

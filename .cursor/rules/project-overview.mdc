@@ -53,8 +53,10 @@ Runtime deps so far: `dukascopy-node` (URL layout for the datafeed) and
   - `src/shared/sizing.ts` — delegates pip-value to the kernel; returns
     `category` on result; `UnsupportedQuoteCurrencyError` removed.
 - **M2 — Data ingest** (in progress): Dukascopy fetch → bi5 decode →
-  1 s bars → DuckDB-queryable Parquet store. Pure half is done; the
-  I/O half is next.
+  1 s bars → DuckDB-queryable Parquet store. Pure half done (slices
+  1–4a); the Dukascopy adapter and the orchestrator on top of it are
+  done (4b, 5); the persistent bar store and a CLI entry are next
+  (6, 7).
   - **Slice 1 done** (`875d214`): `src/shared/dukascopy/bi5.ts` —
     pure 20-byte big-endian tick-record decoder. Bid/ask/bidVol/askVol.
   - **Slice 2 done** (`c056920`): `src/shared/bars/aggregate.ts` —
@@ -79,23 +81,38 @@ Runtime deps so far: `dukascopy-node` (URL layout for the datafeed) and
     `decodeBi5Records → ticksToSecondBars` over hand-crafted bi5 bytes
     to pin the cross-module contract. Convention documented in
     `DEVELOPMENT.md` §3 and the workflow rule.
-  - **Slice 5 done**: `src/main/data/ingest.ts` — ingest orchestrator.
-    Walks `[fromHourMs, toHourMs)` one UTC hour at a time, fetches
-    bi5 bytes via `DukascopyClient`, decodes (with the per-instrument
-    `dukascopyPriceScale` from `priceScale.ts`, which reads
-    `instrumentMetaData[sym].decimalFactor` from `dukascopy-node`),
-    aggregates to bars, and writes to an injected `BarStore`. Single
-    error class `IngestError` carries `{ phase, hourMs?, cause? }`;
-    failure stops the loop. Empty hours write through as `bars: []`
-    so a future resume path can tell "checked, nothing there" from
-    "never checked". Companion `ingest.integration.test.ts` pins
-    end-to-end byte→bar shape (incl. EURUSD 1e5 vs USDJPY/XAUUSD 1e3
-    scale selection) using real bi5/aggregate, fake client/store.
-  - **Slice 6 next**: DuckDB bar store (adds `duckdb` runtime dep).
-  - **Slice 7**: end-to-end smoke test / CLI entry.
+  - **Slice 5 done** (`f30763c`): `src/main/data/ingest.ts` +
+    `priceScale.ts`. `ingestSymbol` walks `[fromHourMs, toHourMs)`
+    one UTC hour at a time, fetches bi5 bytes via `DukascopyClient`,
+    decodes (with the per-instrument `dukascopyPriceScale`, which
+    reads `instrumentMetaData[sym].decimalFactor` from
+    `dukascopy-node`), aggregates to bars, and writes to an injected
+    `BarStore`. Single error class `IngestError` carries
+    `{ phase, hourMs?, cause? }` (phase ∈
+    `spec | symbol | fetch | decode | aggregate | store`); failure
+    stops the loop. Empty hours write through as `bars: []` so a
+    future resume path can tell "checked, nothing there" from "never
+    checked". Spec validation rejects `from === to` (consistent with
+    the `from < to` invariant). `BarStore` is keyed on
+    `symbol: string` (catalog form); brand deferred until a second
+    consumer of catalog strings appears. Companion
+    `ingest.integration.test.ts` pins end-to-end byte→bar shape using
+    real bi5/aggregate, fake client/store — most importantly the
+    EURUSD 1e5 vs USDJPY/XAUUSD 1e3 scale selection, which would
+    silently produce 100×-wrong prices (no throw) if mis-wired.
+  - **Slice 6 next**: DuckDB bar store. Implements the `BarStore`
+    interface from slice 5 against a real DuckDB-queryable Parquet
+    layout (paths from `src/shared/storage/paths.ts`). Adds `duckdb`
+    runtime dep and the project's first I/O-bound integration tests
+    (per `development-workflow.mdc` §"Integration tests").
+  - **Slice 7**: end-to-end smoke test / CLI entry that wires
+    `createDukascopyClient()` + the slice-6 store + `ingestSymbol`
+    behind a single command for one symbol × one day.
 - **M3+** (replay engine, paper broker, charts, UI): not started.
 
-`npm test` and `npm run typecheck` are both clean at HEAD.
+At HEAD (`f30763c`): 305 unit/integration tests pass, 1 skipped (the
+opt-in Dukascopy network test, gated by `HINDSIGHT_RUN_NETWORK=1`).
+`npm run typecheck` is clean.
 
 ## Key conventions (short form — full text in DEVELOPMENT.md)
 
