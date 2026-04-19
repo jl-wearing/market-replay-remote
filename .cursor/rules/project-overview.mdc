@@ -29,8 +29,12 @@ Runtime deps so far: `dukascopy-node` (URL layout for the datafeed) and
     (catalog → Dukascopy identifier, branded `DukascopySymbol`).
   - `src/shared/storage/` — `paths.ts` (POSIX path helpers for the
     tick + bar layout from `ARCHITECTURE.md`).
-- `src/main/` — Electron main process. Currently just
-  `src/main/data/dukascopyClient.ts` (the first I/O adapter, M2 slice 4b).
+- `src/main/` — Electron main process. Subdirs:
+  - `src/main/data/` — `dukascopyClient.ts` (first I/O adapter,
+    M2 slice 4b), `priceScale.ts` (per-instrument bi5 wire-scale
+    sourced from `dukascopy-node`), `ingest.ts` (orchestrator that
+    walks symbol×hour ranges, decodes, aggregates, writes to a
+    `BarStore` seam — M2 slice 5).
 - `src/renderer/` — React UI (planned M3+).
 - Tests live co-located: `<module>.test.ts` next to `<module>.ts`.
 
@@ -75,11 +79,19 @@ Runtime deps so far: `dukascopy-node` (URL layout for the datafeed) and
     `decodeBi5Records → ticksToSecondBars` over hand-crafted bi5 bytes
     to pin the cross-module contract. Convention documented in
     `DEVELOPMENT.md` §3 and the workflow rule.
-  - **Slice 5 next**: `src/main/data/ingest.ts` — ingest orchestrator
-    (takes `DukascopyClient`, walks (symbol × hour) ranges, decodes,
-    aggregates, hands bars to a bar-store interface that's stubbed
-    until slice 6).
-  - **Slice 6**: DuckDB bar store (adds `duckdb` runtime dep).
+  - **Slice 5 done**: `src/main/data/ingest.ts` — ingest orchestrator.
+    Walks `[fromHourMs, toHourMs)` one UTC hour at a time, fetches
+    bi5 bytes via `DukascopyClient`, decodes (with the per-instrument
+    `dukascopyPriceScale` from `priceScale.ts`, which reads
+    `instrumentMetaData[sym].decimalFactor` from `dukascopy-node`),
+    aggregates to bars, and writes to an injected `BarStore`. Single
+    error class `IngestError` carries `{ phase, hourMs?, cause? }`;
+    failure stops the loop. Empty hours write through as `bars: []`
+    so a future resume path can tell "checked, nothing there" from
+    "never checked". Companion `ingest.integration.test.ts` pins
+    end-to-end byte→bar shape (incl. EURUSD 1e5 vs USDJPY/XAUUSD 1e3
+    scale selection) using real bi5/aggregate, fake client/store.
+  - **Slice 6 next**: DuckDB bar store (adds `duckdb` runtime dep).
   - **Slice 7**: end-to-end smoke test / CLI entry.
 - **M3+** (replay engine, paper broker, charts, UI): not started.
 
