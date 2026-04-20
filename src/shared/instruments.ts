@@ -236,6 +236,13 @@ export const INSTRUMENTS: Readonly<Record<string, InstrumentSpec>> = Object.free
   },
 });
 
+/**
+ * Look up an `InstrumentSpec` by its catalog symbol (e.g. `"EURUSD"`).
+ *
+ * Strict: throws `UnknownInstrumentError` for any string not present as a
+ * key in `INSTRUMENTS`. Does not normalise case or trim whitespace —
+ * surfacing bad call sites is worth more than the convenience of coercion.
+ */
 export function getInstrument(symbol: string): InstrumentSpec {
   const instrument = INSTRUMENTS[symbol];
   if (!instrument) {
@@ -244,6 +251,12 @@ export function getInstrument(symbol: string): InstrumentSpec {
   return instrument;
 }
 
+/**
+ * Thrown when a catalog-symbol lookup fails: unknown symbol, wrong case,
+ * whitespace-padded input, empty string, or a non-string runtime value.
+ * Carries the offending value as `symbol` (coerced to string) so callers
+ * can surface a useful error message.
+ */
 export class UnknownInstrumentError extends Error {
   readonly symbol: string;
   constructor(symbol: string) {
@@ -251,6 +264,38 @@ export class UnknownInstrumentError extends Error {
     this.name = "UnknownInstrumentError";
     this.symbol = symbol;
   }
+}
+
+/**
+ * Nominal type for a catalog-validated instrument symbol (e.g. `"EURUSD"`,
+ * `"XAUUSD"`, `"GER40"`). The brand is a compile-time phantom field with
+ * zero runtime cost; the only constructor is `toCatalogSymbol`. Functions
+ * that take a `CatalogSymbol` are compile-time guaranteed to receive a
+ * string that passed catalog-membership validation, which lets them skip
+ * the check and makes it impossible to pass a raw `"ZZZBOGUS"` literal
+ * by mistake.
+ *
+ * Mirrors the `DukascopySymbol` brand in `shared/dukascopy/symbolMap.ts`.
+ * Used by the ingest orchestrator and the DuckDB bar store.
+ */
+export type CatalogSymbol = string & { readonly __brand: "CatalogSymbol" };
+
+/**
+ * Validate that `symbol` is a known catalog key and return it branded as
+ * `CatalogSymbol`. Throws `UnknownInstrumentError` on anything that is
+ * not a current `INSTRUMENTS` key — including empty strings, non-string
+ * runtime values, wrong-case variants, and whitespace-padded inputs.
+ *
+ * At runtime the returned value is identical to the input string; the
+ * brand is a compile-time phantom. Downstream APIs (`ingestSymbol`,
+ * `DuckDbBarStore`) accept only `CatalogSymbol` so the compiler blocks
+ * un-validated raw strings at their call sites.
+ */
+export function toCatalogSymbol(symbol: string): CatalogSymbol {
+  if (typeof symbol !== "string" || !(symbol in INSTRUMENTS)) {
+    throw new UnknownInstrumentError(String(symbol));
+  }
+  return symbol as CatalogSymbol;
 }
 
 /**

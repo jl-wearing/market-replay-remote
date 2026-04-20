@@ -33,6 +33,10 @@ import {
   catalogToDukascopy,
   type DukascopySymbol,
 } from "../../shared/dukascopy/symbolMap.js";
+import {
+  toCatalogSymbol,
+  type CatalogSymbol,
+} from "../../shared/instruments.js";
 import type { DukascopyClient } from "./dukascopyClient.js";
 import { type BarStore, IngestError, ingestSymbol } from "./ingest.js";
 
@@ -59,7 +63,7 @@ function encodeBi5(records: ReadonlyArray<{
 }
 
 interface CapturedHour {
-  symbol: string;
+  symbol: CatalogSymbol;
   hourMs: number;
   bars: readonly Bar[];
 }
@@ -89,6 +93,10 @@ function makeClient(
 const HOUR_0 = Date.UTC(2024, 0, 15, 10, 0, 0, 0);
 const HOUR_1 = HOUR_0 + ONE_HOUR_MS;
 
+const EURUSD_CAT = toCatalogSymbol("EURUSD");
+const USDJPY_CAT = toCatalogSymbol("USDJPY");
+const XAUUSD_CAT = toCatalogSymbol("XAUUSD");
+
 describe("ingestSymbol — integration: bi5 → orchestrator → store", () => {
   it("for EURUSD (1e5 wire scale): 4 records across 2 hours produce the correct bars in the correct writeHour batches", async () => {
     // Hour 0: two ticks in the 0th second, two ticks in the 2nd second.
@@ -112,7 +120,7 @@ describe("ingestSymbol — integration: bi5 → orchestrator → store", () => {
 
     const { store, written } = makeStore();
     const stats = await ingestSymbol(
-      { symbol: "EURUSD", fromHourMs: HOUR_0, toHourMs: HOUR_1 + ONE_HOUR_MS },
+      { symbol: EURUSD_CAT, fromHourMs: HOUR_0, toHourMs: HOUR_1 + ONE_HOUR_MS },
       { client: makeClient(responses), store },
     );
 
@@ -161,7 +169,7 @@ describe("ingestSymbol — integration: bi5 → orchestrator → store", () => {
 
     const { store, written } = makeStore();
     await ingestSymbol(
-      { symbol: "USDJPY", fromHourMs: HOUR_0, toHourMs: HOUR_1 },
+      { symbol: USDJPY_CAT, fromHourMs: HOUR_0, toHourMs: HOUR_1 },
       { client: makeClient(responses), store },
     );
 
@@ -184,7 +192,7 @@ describe("ingestSymbol — integration: bi5 → orchestrator → store", () => {
 
     const { store, written } = makeStore();
     await ingestSymbol(
-      { symbol: "XAUUSD", fromHourMs: HOUR_0, toHourMs: HOUR_1 },
+      { symbol: XAUUSD_CAT, fromHourMs: HOUR_0, toHourMs: HOUR_1 },
       { client: makeClient(responses), store },
     );
 
@@ -210,7 +218,7 @@ describe("ingestSymbol — integration: bi5 → orchestrator → store", () => {
 
     const { store, written } = makeStore();
     const stats = await ingestSymbol(
-      { symbol: "EURUSD", fromHourMs: HOUR_0, toHourMs: HOUR_0 + 3 * ONE_HOUR_MS },
+      { symbol: EURUSD_CAT, fromHourMs: HOUR_0, toHourMs: HOUR_0 + 3 * ONE_HOUR_MS },
       { client: makeClient(responses), store },
     );
 
@@ -237,7 +245,7 @@ describe("ingestSymbol — integration: bi5 → orchestrator → store", () => {
     let caught: unknown = null;
     try {
       await ingestSymbol(
-        { symbol: "EURUSD", fromHourMs: HOUR_0, toHourMs: HOUR_1 },
+        { symbol: EURUSD_CAT, fromHourMs: HOUR_0, toHourMs: HOUR_1 },
         { client: makeClient(responses), store },
       );
     } catch (err) {
@@ -286,7 +294,7 @@ describe("ingestSymbol — integration: invariants over a multi-hour synthetic r
 
     const { store, written } = makeStore();
     const stats = await ingestSymbol(
-      { symbol: "EURUSD", fromHourMs: HOUR_0, toHourMs: HOUR_0 + hours * ONE_HOUR_MS },
+      { symbol: EURUSD_CAT, fromHourMs: HOUR_0, toHourMs: HOUR_0 + hours * ONE_HOUR_MS },
       { client: makeClient(responses), store },
     );
 
@@ -311,11 +319,11 @@ describe("ingestSymbol — integration: invariants over a multi-hour synthetic r
   it("the dukascopy-symbol passed to fetchHour is exactly catalogToDukascopy(spec.symbol) for several catalog symbols", async () => {
     // Sanity: orchestrator threads the brand right. One sample from
     // each scale class.
-    const samples: ReadonlyArray<readonly [string, DukascopySymbol]> = [
-      ["EURUSD", catalogToDukascopy("EURUSD")],
-      ["USDJPY", catalogToDukascopy("USDJPY")],
-      ["XAUUSD", catalogToDukascopy("XAUUSD")],
-      ["GER40", catalogToDukascopy("GER40")],
+    const samples: ReadonlyArray<readonly [CatalogSymbol, DukascopySymbol]> = [
+      [toCatalogSymbol("EURUSD"), catalogToDukascopy("EURUSD")],
+      [toCatalogSymbol("USDJPY"), catalogToDukascopy("USDJPY")],
+      [toCatalogSymbol("XAUUSD"), catalogToDukascopy("XAUUSD")],
+      [toCatalogSymbol("GER40"), catalogToDukascopy("GER40")],
     ];
     for (const [catalog, expectedDuka] of samples) {
       const seen: DukascopySymbol[] = [];

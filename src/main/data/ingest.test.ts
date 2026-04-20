@@ -4,6 +4,10 @@ import {
   catalogToDukascopy,
   type DukascopySymbol,
 } from "../../shared/dukascopy/symbolMap.js";
+import {
+  toCatalogSymbol,
+  type CatalogSymbol,
+} from "../../shared/instruments.js";
 import type { DukascopyClient, FetchHourArgs } from "./dukascopyClient.js";
 import { DukascopyFetchError } from "./dukascopyClient.js";
 import {
@@ -77,7 +81,7 @@ function makeFakeClient(opts: {
 }
 
 interface StoreCall {
-  symbol: string;
+  symbol: CatalogSymbol;
   hourMs: number;
   bars: readonly Bar[];
 }
@@ -108,6 +112,8 @@ const HOUR_1 = HOUR_0 + ONE_HOUR_MS;
 const HOUR_2 = HOUR_0 + 2 * ONE_HOUR_MS;
 
 const EURUSD = catalogToDukascopy("EURUSD");
+const EURUSD_CAT = toCatalogSymbol("EURUSD");
+const USDJPY_CAT = toCatalogSymbol("USDJPY");
 
 // ─────────────────────────────────────────────────────────────────────────
 // — core behaviour
@@ -125,7 +131,7 @@ describe("ingestSymbol — core behaviour", () => {
     const store = makeFakeStore();
 
     const stats = await ingestSymbol(
-      { symbol: "EURUSD", fromHourMs: HOUR_0, toHourMs: HOUR_1 },
+      { symbol: EURUSD_CAT, fromHourMs: HOUR_0, toHourMs: HOUR_1 },
       { client: client.client, store: store.store },
     );
 
@@ -158,7 +164,7 @@ describe("ingestSymbol — core behaviour", () => {
     };
 
     await ingestSymbol(
-      { symbol: "EURUSD", fromHourMs: HOUR_0, toHourMs: HOUR_0 + 3 * ONE_HOUR_MS },
+      { symbol: EURUSD_CAT, fromHourMs: HOUR_0, toHourMs: HOUR_0 + 3 * ONE_HOUR_MS },
       { client, store },
     );
 
@@ -177,7 +183,7 @@ describe("ingestSymbol — core behaviour", () => {
     const store = makeFakeStore();
 
     await ingestSymbol(
-      { symbol: "USDJPY", fromHourMs: HOUR_0, toHourMs: HOUR_1 },
+      { symbol: USDJPY_CAT, fromHourMs: HOUR_0, toHourMs: HOUR_1 },
       { client: client.client, store: store.store },
     );
 
@@ -204,7 +210,7 @@ describe("ingestSymbol — core behaviour", () => {
     const progress: Array<[number, number]> = [];
 
     await ingestSymbol(
-      { symbol: "EURUSD", fromHourMs: HOUR_0, toHourMs: HOUR_2 },
+      { symbol: EURUSD_CAT, fromHourMs: HOUR_0, toHourMs: HOUR_2 },
       {
         client: client.client,
         store: store.store,
@@ -237,7 +243,7 @@ describe("ingestSymbol — core behaviour", () => {
     const store = makeFakeStore();
 
     const stats = await ingestSymbol(
-      { symbol: "EURUSD", fromHourMs: HOUR_0, toHourMs: HOUR_0 + 3 * ONE_HOUR_MS },
+      { symbol: EURUSD_CAT, fromHourMs: HOUR_0, toHourMs: HOUR_0 + 3 * ONE_HOUR_MS },
       { client: client.client, store: store.store },
     );
 
@@ -260,7 +266,7 @@ describe("ingestSymbol — edge cases", () => {
     const store = makeFakeStore();
 
     const stats = await ingestSymbol(
-      { symbol: "EURUSD", fromHourMs: HOUR_0, toHourMs: HOUR_1 },
+      { symbol: EURUSD_CAT, fromHourMs: HOUR_0, toHourMs: HOUR_1 },
       { client: client.client, store: store.store },
     );
 
@@ -279,7 +285,7 @@ describe("ingestSymbol — edge cases", () => {
     const store = makeFakeStore();
 
     const stats = await ingestSymbol(
-      { symbol: "EURUSD", fromHourMs: HOUR_0, toHourMs: HOUR_0 + 5 * ONE_HOUR_MS },
+      { symbol: EURUSD_CAT, fromHourMs: HOUR_0, toHourMs: HOUR_0 + 5 * ONE_HOUR_MS },
       { client: client.client, store: store.store },
     );
 
@@ -296,7 +302,7 @@ describe("ingestSymbol — edge cases", () => {
     const store = makeFakeStore();
 
     await ingestSymbol(
-      { symbol: "EURUSD", fromHourMs: HOUR_0, toHourMs: HOUR_0 + 24 * ONE_HOUR_MS },
+      { symbol: EURUSD_CAT, fromHourMs: HOUR_0, toHourMs: HOUR_0 + 24 * ONE_HOUR_MS },
       { client: client.client, store: store.store },
     );
 
@@ -314,7 +320,7 @@ describe("ingestSymbol — edge cases", () => {
 
     await expect(
       ingestSymbol(
-        { symbol: "EURUSD", fromHourMs: HOUR_0, toHourMs: HOUR_1 },
+        { symbol: EURUSD_CAT, fromHourMs: HOUR_0, toHourMs: HOUR_1 },
         { client: client.client, store: store.store },
       ),
     ).resolves.toBeDefined();
@@ -325,7 +331,7 @@ describe("ingestSymbol — edge cases", () => {
     const store = makeFakeStore();
 
     await ingestSymbol(
-      { symbol: "EURUSD", fromHourMs: 0, toHourMs: ONE_HOUR_MS },
+      { symbol: EURUSD_CAT, fromHourMs: 0, toHourMs: ONE_HOUR_MS },
       { client: client.client, store: store.store },
     );
 
@@ -341,7 +347,7 @@ describe("ingestSymbol — edge cases", () => {
     const store = makeFakeStore();
 
     const stats = await ingestSymbol(
-      { symbol: "EURUSD", fromHourMs: HOUR_0, toHourMs: HOUR_1 },
+      { symbol: EURUSD_CAT, fromHourMs: HOUR_0, toHourMs: HOUR_1 },
       { client: client.client, store: store.store },
     );
 
@@ -368,10 +374,10 @@ describe("ingestSymbol — breaking tests (spec validation, no I/O)", () => {
   }
 
   function expectSpecError(
-    overrides: { fromHourMs?: number; toHourMs?: number; symbol?: string },
+    overrides: { fromHourMs?: number; toHourMs?: number; symbol?: CatalogSymbol },
   ) {
     const spec = {
-      symbol: overrides.symbol ?? "EURUSD",
+      symbol: overrides.symbol ?? EURUSD_CAT,
       fromHourMs: overrides.fromHourMs ?? HOUR_0,
       toHourMs: overrides.toHourMs ?? HOUR_1,
     };
@@ -444,7 +450,7 @@ describe("ingestSymbol — breaking tests (spec validation, no I/O)", () => {
     let caught: unknown = null;
     try {
       await ingestSymbol(
-        { symbol: "EURUSD", fromHourMs: NaN, toHourMs: HOUR_1 },
+        { symbol: EURUSD_CAT, fromHourMs: NaN, toHourMs: HOUR_1 },
         noopDeps(),
       );
     } catch (err) {
@@ -460,7 +466,7 @@ describe("ingestSymbol — breaking tests (spec validation, no I/O)", () => {
     const store = makeFakeStore();
     await expect(
       ingestSymbol(
-        { symbol: "EURUSD", fromHourMs: NaN, toHourMs: HOUR_1 },
+        { symbol: EURUSD_CAT, fromHourMs: NaN, toHourMs: HOUR_1 },
         { client: client.client, store: store.store },
       ),
     ).rejects.toBeInstanceOf(IngestError);
@@ -468,13 +474,25 @@ describe("ingestSymbol — breaking tests (spec validation, no I/O)", () => {
     expect(store.calls).toEqual([]);
   });
 
-  it("throws IngestError with phase 'symbol' for an unknown catalog symbol", async () => {
+  it("throws IngestError with phase 'symbol' when a bypassed CatalogSymbol does not map to Dukascopy (defensive runtime check)", async () => {
+    // The `CatalogSymbol` brand is normally produced only by
+    // `toCatalogSymbol`, which rejects non-catalog strings at compile
+    // time + runtime. The `as` cast below simulates an upstream escape
+    // hatch (unsafe cast, corrupted config file, data-shape regression
+    // in `dukascopy-node`). The orchestrator's defensive try/catch
+    // around `catalogToDukascopy` / `dukascopyPriceScale` must still
+    // wrap the failure as `IngestError({ phase: "symbol" })` so the
+    // caller sees a consistent error type.
     const client = makeFakeClient();
     const store = makeFakeStore();
     let caught: unknown = null;
     try {
       await ingestSymbol(
-        { symbol: "ZZZBOGUS", fromHourMs: HOUR_0, toHourMs: HOUR_1 },
+        {
+          symbol: "ZZZBOGUS" as unknown as CatalogSymbol,
+          fromHourMs: HOUR_0,
+          toHourMs: HOUR_1,
+        },
         { client: client.client, store: store.store },
       );
     } catch (err) {
@@ -499,7 +517,7 @@ describe("ingestSymbol — breaking tests (adapter / pipeline failures)", () => 
     let caught: unknown = null;
     try {
       await ingestSymbol(
-        { symbol: "EURUSD", fromHourMs: HOUR_0, toHourMs: HOUR_0 + 3 * ONE_HOUR_MS },
+        { symbol: EURUSD_CAT, fromHourMs: HOUR_0, toHourMs: HOUR_0 + 3 * ONE_HOUR_MS },
         { client: client.client, store: store.store },
       );
     } catch (err) {
@@ -528,7 +546,7 @@ describe("ingestSymbol — breaking tests (adapter / pipeline failures)", () => 
     let caught: unknown = null;
     try {
       await ingestSymbol(
-        { symbol: "EURUSD", fromHourMs: HOUR_0, toHourMs: HOUR_1 },
+        { symbol: EURUSD_CAT, fromHourMs: HOUR_0, toHourMs: HOUR_1 },
         { client: client.client, store: store.store },
       );
     } catch (err) {
@@ -557,7 +575,7 @@ describe("ingestSymbol — breaking tests (adapter / pipeline failures)", () => 
     let caught: unknown = null;
     try {
       await ingestSymbol(
-        { symbol: "EURUSD", fromHourMs: HOUR_0, toHourMs: HOUR_1 },
+        { symbol: EURUSD_CAT, fromHourMs: HOUR_0, toHourMs: HOUR_1 },
         { client: client.client, store: store.store },
       );
     } catch (err) {
@@ -582,7 +600,7 @@ describe("ingestSymbol — breaking tests (adapter / pipeline failures)", () => 
     let caught: unknown = null;
     try {
       await ingestSymbol(
-        { symbol: "EURUSD", fromHourMs: HOUR_0, toHourMs: HOUR_0 + 2 * ONE_HOUR_MS },
+        { symbol: EURUSD_CAT, fromHourMs: HOUR_0, toHourMs: HOUR_0 + 2 * ONE_HOUR_MS },
         { client: client.client, store: store.store },
       );
     } catch (err) {
@@ -605,7 +623,7 @@ describe("ingestSymbol — breaking tests (adapter / pipeline failures)", () => 
 
     await expect(
       ingestSymbol(
-        { symbol: "EURUSD", fromHourMs: HOUR_0, toHourMs: HOUR_0 + 3 * ONE_HOUR_MS },
+        { symbol: EURUSD_CAT, fromHourMs: HOUR_0, toHourMs: HOUR_0 + 3 * ONE_HOUR_MS },
         {
           client: client.client,
           store: store.store,
@@ -635,7 +653,7 @@ describe("ingestSymbol — invariants (property-style)", () => {
       const client = makeFakeClient();
       const store = makeFakeStore();
       const stats = await ingestSymbol(
-        { symbol: "EURUSD", fromHourMs: from, toHourMs: to },
+        { symbol: EURUSD_CAT, fromHourMs: from, toHourMs: to },
         { client: client.client, store: store.store },
       );
       const expected = (to - from) / ONE_HOUR_MS;
@@ -666,7 +684,7 @@ describe("ingestSymbol — invariants (property-style)", () => {
     const store = makeFakeStore();
 
     const stats = await ingestSymbol(
-      { symbol: "EURUSD", fromHourMs: HOUR_0, toHourMs: HOUR_0 + 3 * ONE_HOUR_MS },
+      { symbol: EURUSD_CAT, fromHourMs: HOUR_0, toHourMs: HOUR_0 + 3 * ONE_HOUR_MS },
       { client: client.client, store: store.store },
     );
 
@@ -690,7 +708,7 @@ describe("ingestSymbol — invariants (property-style)", () => {
     };
 
     await ingestSymbol(
-      { symbol: "EURUSD", fromHourMs: HOUR_0, toHourMs: HOUR_0 + 4 * ONE_HOUR_MS },
+      { symbol: EURUSD_CAT, fromHourMs: HOUR_0, toHourMs: HOUR_0 + 4 * ONE_HOUR_MS },
       { client, store },
     );
 
@@ -716,7 +734,7 @@ describe("ingestSymbol — invariants (property-style)", () => {
     const store = makeFakeStore();
 
     const stats = await ingestSymbol(
-      { symbol: "EURUSD", fromHourMs: HOUR_0, toHourMs: HOUR_0 + 4 * ONE_HOUR_MS },
+      { symbol: EURUSD_CAT, fromHourMs: HOUR_0, toHourMs: HOUR_0 + 4 * ONE_HOUR_MS },
       { client: client.client, store: store.store },
     );
 

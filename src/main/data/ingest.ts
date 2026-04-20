@@ -27,6 +27,7 @@ import type { Bar } from "../../shared/types.js";
 import { decodeBi5Records } from "../../shared/dukascopy/bi5.js";
 import { ticksToSecondBars } from "../../shared/bars/aggregate.js";
 import { catalogToDukascopy } from "../../shared/dukascopy/symbolMap.js";
+import type { CatalogSymbol } from "../../shared/instruments.js";
 import type { DukascopyClient } from "./dukascopyClient.js";
 import { dukascopyPriceScale } from "./priceScale.js";
 
@@ -35,12 +36,11 @@ const ONE_HOUR_MS = 3_600_000;
 /**
  * Persistence sink for ingested bars.
  *
- * Keyed on the catalog symbol (e.g. `"EURUSD"`) — the user-facing form
- * — to keep query paths from having to round-trip through
- * `catalogToDukascopy`. Branded `CatalogSymbol` is deliberately *not*
- * introduced here; we will brand it the first time a second consumer of
- * a catalog-string parameter shows up (the renderer or the slice-6
- * DuckDB store), to avoid type ceremony without a real second caller.
+ * Keyed on the branded `CatalogSymbol` (e.g. `toCatalogSymbol("EURUSD")`)
+ * so callers cannot pass an un-validated raw string — the compiler
+ * refuses. Slice 6 (the DuckDB bar store) was the trigger for the brand:
+ * a second consumer of catalog-string parameters made the compile-time
+ * guarantee worth its weight.
  */
 export interface BarStore {
   /**
@@ -51,7 +51,7 @@ export interface BarStore {
    * the store decides whether to record a marker.
    */
   writeHour(args: {
-    symbol: string;
+    symbol: CatalogSymbol;
     hourMs: number;
     bars: readonly Bar[];
   }): Promise<void>;
@@ -95,8 +95,13 @@ export class IngestError extends Error {
 
 /** What `ingestSymbol` is asked to do. */
 export interface IngestSpec {
-  /** Catalog symbol, e.g. `"EURUSD"`. Resolved internally via `catalogToDukascopy`. */
-  symbol: string;
+  /**
+   * Catalog symbol, validated by `toCatalogSymbol`. Resolved internally
+   * via `catalogToDukascopy`. The brand ensures the compiler rejects
+   * un-validated raw strings; the orchestrator still keeps a defensive
+   * runtime check for `as`-cast escape hatches (see `phase: "symbol"`).
+   */
+  symbol: CatalogSymbol;
   /** Inclusive lower bound of the hour range. Aligned to a UTC hour boundary. */
   fromHourMs: number;
   /** Exclusive upper bound. Aligned, strictly greater than `fromHourMs`. */

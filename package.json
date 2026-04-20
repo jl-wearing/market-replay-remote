@@ -21,6 +21,7 @@
     "vitest": "^4.1.4"
   },
   "dependencies": {
+    "@duckdb/node-api": "1.5.2-r.1",
     "dukascopy-node": "^1.46.4",
     "lzma": "^2.3.2"
   }

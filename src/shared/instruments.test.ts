@@ -4,6 +4,8 @@ import {
   UnknownInstrumentError,
   getInstrument,
   instrumentCategory,
+  toCatalogSymbol,
+  type CatalogSymbol,
   type InstrumentSpec,
 } from "./instruments.js";
 
@@ -286,6 +288,133 @@ describe("instruments catalog — invariants (property-style)", () => {
       expect(spec.symbol).toBe(key);
       expect(key).toBe(key.toUpperCase());
       expect(key.length).toBeGreaterThan(0);
+    }
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────
+// toCatalogSymbol — the validator that produces `CatalogSymbol` brand values.
+//
+// The brand exists so downstream APIs (the ingest orchestrator, the
+// DuckDB bar store) can accept only catalog-validated strings; the compiler
+// then refuses stray literals like `"zzzbogus"` without forcing those
+// callers to repeat the catalog-membership check.
+// ─────────────────────────────────────────────────────────────────────────
+
+describe("toCatalogSymbol — core behaviour", () => {
+  it("returns the input string unchanged at runtime for a known direct symbol", () => {
+    const sym = toCatalogSymbol("EURUSD");
+    expect(sym).toBe("EURUSD");
+    expect(typeof sym).toBe("string");
+  });
+
+  it("accepts each DIRECT symbol", () => {
+    for (const symbol of DIRECT_SYMBOLS) {
+      expect(toCatalogSymbol(symbol)).toBe(symbol);
+    }
+  });
+
+  it("accepts each INVERSE symbol", () => {
+    for (const symbol of INVERSE_SYMBOLS) {
+      expect(toCatalogSymbol(symbol)).toBe(symbol);
+    }
+  });
+
+  it("accepts each CROSS symbol", () => {
+    for (const symbol of CROSS_SYMBOLS) {
+      expect(toCatalogSymbol(symbol)).toBe(symbol);
+    }
+  });
+
+  it("returned value widens to string (brand is phantom, zero runtime cost)", () => {
+    const sym: CatalogSymbol = toCatalogSymbol("XAUUSD");
+    const asString: string = sym;
+    expect(asString).toBe("XAUUSD");
+    expect(`${sym}`).toBe("XAUUSD");
+  });
+});
+
+describe("toCatalogSymbol — edge cases", () => {
+  it("is deterministic: same input produces same value", () => {
+    expect(toCatalogSymbol("EURUSD")).toBe(toCatalogSymbol("EURUSD"));
+  });
+
+  it("is pure: validating one symbol does not leak state to the next call", () => {
+    const a = toCatalogSymbol("EURUSD");
+    const b = toCatalogSymbol("USDJPY");
+    expect(a).toBe("EURUSD");
+    expect(b).toBe("USDJPY");
+    expect(toCatalogSymbol("EURUSD")).toBe("EURUSD");
+  });
+});
+
+describe("toCatalogSymbol — breaking tests (must throw)", () => {
+  it("throws UnknownInstrumentError on unknown symbol", () => {
+    expect(() => toCatalogSymbol("ZZZBOGUS")).toThrow(UnknownInstrumentError);
+  });
+
+  it("throws UnknownInstrumentError on empty string", () => {
+    expect(() => toCatalogSymbol("")).toThrow(UnknownInstrumentError);
+  });
+
+  it("is case-sensitive: lowercase catalog symbol throws", () => {
+    expect(() => toCatalogSymbol("eurusd")).toThrow(UnknownInstrumentError);
+  });
+
+  it("is case-sensitive: mixed-case catalog symbol throws", () => {
+    expect(() => toCatalogSymbol("EurUsd")).toThrow(UnknownInstrumentError);
+  });
+
+  it("rejects a whitespace-padded symbol (no silent trimming)", () => {
+    expect(() => toCatalogSymbol(" EURUSD")).toThrow(UnknownInstrumentError);
+    expect(() => toCatalogSymbol("EURUSD ")).toThrow(UnknownInstrumentError);
+  });
+
+  it("rejects non-string runtime input (null / undefined / number)", () => {
+    expect(() => toCatalogSymbol(null as unknown as string)).toThrow(
+      UnknownInstrumentError,
+    );
+    expect(() => toCatalogSymbol(undefined as unknown as string)).toThrow(
+      UnknownInstrumentError,
+    );
+    expect(() => toCatalogSymbol(123 as unknown as string)).toThrow(
+      UnknownInstrumentError,
+    );
+  });
+
+  it("thrown UnknownInstrumentError carries the offending symbol verbatim", () => {
+    try {
+      toCatalogSymbol("NOPE");
+      throw new Error("expected throw");
+    } catch (err) {
+      expect(err).toBeInstanceOf(UnknownInstrumentError);
+      expect((err as UnknownInstrumentError).symbol).toBe("NOPE");
+    }
+  });
+});
+
+describe("toCatalogSymbol — invariants (property-style)", () => {
+  it("accepts exactly the keys of INSTRUMENTS", () => {
+    for (const key of Object.keys(INSTRUMENTS)) {
+      expect(() => toCatalogSymbol(key)).not.toThrow();
+      expect(toCatalogSymbol(key)).toBe(key);
+    }
+  });
+
+  it("rejects a representative sample of non-catalog strings", () => {
+    const rejected = [
+      "EUR-USD",
+      "EUR/USD",
+      "EURUSD.m",
+      "FOO",
+      "USD",
+      "eur",
+      "BTCUSD", // deliberately not in catalog
+      "XPTUSD", // platinum: explicitly not in catalog
+      "XPDUSD", // palladium: explicitly not in catalog
+    ];
+    for (const bad of rejected) {
+      expect(() => toCatalogSymbol(bad)).toThrow(UnknownInstrumentError);
     }
   });
 });

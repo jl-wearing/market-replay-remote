@@ -15,6 +15,22 @@ operational details that bite on Windows.
    **edge cases**, **breaking tests** (NaN/Infinity/zero/negative/
    out-of-domain for every numeric & enum parameter), **invariants**
    (property-style grids).
+   Each category is one `describe` block named verbatim `— core
+   behaviour`, `— edge cases`, `— breaking tests (must throw / must
+   not happen)`, `— invariants (property-style)`. When a module has
+   multiple orthogonal validation surfaces (e.g. `writeHour`
+   validation + `readBarsInRange` validation + closed-store + open
+   path), the breaking category MAY be split into multiple blocks
+   whose names share the `— breaking tests` prefix and add a
+   parenthesised scope, e.g. `— breaking tests (writeHour
+   validation)`. Do not split for fewer than ~8 breaking tests or
+   for a single surface — the default one-block form stays the norm.
+   The example is `src/main/data/duckDbBarStore.integration.test.ts`.
+   Breaking tests MUST assert the specific error class AND (when the
+   error class carries one) the discriminating tag — `phase`, code,
+   etc. — not just the class. Use a small per-file helper (e.g.
+   `expectBarStoreError(promise, { phase })`) so the next throw site
+   without a tag fails loudly.
 3. Run tests — **confirm red for the right reason** before implementing.
 4. Implement the minimum to go green.
 5. Run `npm test` (all files) and `npm run typecheck`. Both must be clean.
@@ -50,19 +66,23 @@ Do not merge steps 2 and 4. Do not commit without the DoD walk.
   and M2 slices 1–4a all shipped with zero non-stdlib runtime deps.
   Each runtime add lands in its own slice/commit alongside an
   `ARCHITECTURE.md` "Technology stack" table update.
-- Runtime deps in tree today (all added in M2 slice 4b, `e0f96d0`):
-  - `dukascopy-node` — Dukascopy URL layout + holiday calendar +
-    `instrumentMetaData` (per-instrument decimal factors, consumed by
-    `src/main/data/priceScale.ts`). We still own bi5 parsing in
-    `src/shared/dukascopy/bi5.ts`.
-  - `lzma` (NMrocks pure-JS LZMA1) + `@types/lzma` — used directly by
-    `dukascopyClient.ts` to decompress `.bi5` payloads. Earlier plan
-    was to defer LZMA to `dukascopy-node`'s own pipeline, but slice 4b
-    bypassed that pipeline (we call `fetch` directly to avoid pulling
-    in its disk-cache + queue stack), so the decompressor became part
-    of our adapter. Pure-JS, no native module.
-- Approved upcoming adds:
-  - M2 slice 6: `duckdb` (Parquet read + 1 s → arbitrary TF aggregation).
+- Runtime deps in tree today:
+  - `dukascopy-node` (added in slice 4b, `e0f96d0`) — Dukascopy URL
+    layout + holiday calendar + `instrumentMetaData` (per-instrument
+    decimal factors, consumed by `src/main/data/priceScale.ts`). We
+    still own bi5 parsing in `src/shared/dukascopy/bi5.ts`.
+  - `lzma` (NMrocks pure-JS LZMA1) + `@types/lzma` (slice 4b) — used
+    directly by `dukascopyClient.ts` to decompress `.bi5` payloads.
+    Earlier plan was to defer LZMA to `dukascopy-node`'s own pipeline,
+    but slice 4b bypassed that pipeline (we call `fetch` directly to
+    avoid pulling in its disk-cache + queue stack), so the
+    decompressor became part of our adapter. Pure-JS, no native
+    module.
+  - `@duckdb/node-api` (slice 6) — 1 s bar hot store at
+    `<root>/bars/1s.duckdb`, exposed via `src/main/data/duckDbBarStore.ts`.
+    Pinned exactly (DuckDB couples its on-disk schema to the engine
+    version). Higher-timeframe aggregation will ride on top of the
+    same table in a later slice.
 - Dev deps (Vitest, TypeScript, `@types/node`) stay pinned to major
   versions compatible with Node 22. Do **not** bump `@types/node` past
   `^22` while the runtime stays on Node 22.
@@ -121,7 +141,12 @@ Two flavours, both following the same four-block layout as unit tests:
   DuckDB, Parquet, or a child process. Use
   `fs.mkdtempSync(path.join(os.tmpdir(), "hindsight-"))` per test,
   clean in `afterEach`, never share a tmpdir, never mock `fs` /
-  `sqlite` / `duckdb`. None landed yet — slice 6 will be the first.
+  `sqlite` / `duckdb`. First example:
+  `src/main/data/duckDbBarStore.integration.test.ts` (slice 6) — real
+  DuckDB in a per-test tmpdir, exercises write → read → reopen →
+  close with no mocks. Note: on Windows the store MUST be `close()`d
+  before `fs.rmSync` the tmpdir, or DuckDB's file handle blocks the
+  delete.
 
 Network tests (`<adapter>.network.test.ts`) are a separate, opt-in
 category — see the seam pattern above.

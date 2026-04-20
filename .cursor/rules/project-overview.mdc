@@ -8,9 +8,9 @@ alwaysApply: true
 A Windows desktop market-replay and paper-trading tool for FX, metals, and
 indices. Stack: Electron + React 19 + TypeScript (strict, ESM, NodeNext),
 Vitest for tests. Node ≥ 22 (staying on v22 for now; not moving to v24).
-Runtime deps so far: `dukascopy-node` (URL layout for the datafeed) and
+Runtime deps: `dukascopy-node` (URL layout for the datafeed) and
 `lzma` (pure-JS LZMA1 decompressor for `.bi5`), both added in M2 slice
-4b. Next runtime add is `duckdb` in M2 slice 6.
+4b; `@duckdb/node-api` (1 s bar hot store) added in M2 slice 6.
 
 ## Source-of-truth docs (read these before making architectural changes)
 
@@ -22,19 +22,23 @@ Runtime deps so far: `dukascopy-node` (URL layout for the datafeed) and
 
 - `src/shared/` — pure, framework-free TypeScript. No I/O, no Electron,
   no React imports. This is where most logic lives today. Subdirs:
-  - `src/shared/` (root) — `instruments.ts`, `pip-value.ts`,
+  - `src/shared/` (root) — `instruments.ts` (catalog + branded
+    `CatalogSymbol` + `toCatalogSymbol` validator), `pip-value.ts`,
     `sizing.ts`, `types.ts` (`Tick`, `Bar`).
   - `src/shared/bars/` — `aggregate.ts` (ticks → 1 s OHLCV).
   - `src/shared/dukascopy/` — `bi5.ts` (tick decoder), `symbolMap.ts`
     (catalog → Dukascopy identifier, branded `DukascopySymbol`).
   - `src/shared/storage/` — `paths.ts` (POSIX path helpers for the
-    tick + bar layout from `ARCHITECTURE.md`).
+    tick + bar archive layout from `ARCHITECTURE.md`).
 - `src/main/` — Electron main process. Subdirs:
   - `src/main/data/` — `dukascopyClient.ts` (first I/O adapter,
     M2 slice 4b), `priceScale.ts` (per-instrument bi5 wire-scale
     sourced from `dukascopy-node`), `ingest.ts` (orchestrator that
     walks symbol×hour ranges, decodes, aggregates, writes to a
-    `BarStore` seam — M2 slice 5).
+    `BarStore` seam — M2 slice 5), `duckDbBarStore.ts` (the slice-6
+    DuckDB-backed implementation of `BarStore`, with a
+    `DuckDbBarStore` extension surface that adds `readBarsInRange` +
+    `close` for M3 replay).
 - `src/renderer/` — React UI (planned M3+).
 - Tests live co-located: `<module>.test.ts` next to `<module>.ts`.
 
@@ -53,10 +57,9 @@ Runtime deps so far: `dukascopy-node` (URL layout for the datafeed) and
   - `src/shared/sizing.ts` — delegates pip-value to the kernel; returns
     `category` on result; `UnsupportedQuoteCurrencyError` removed.
 - **M2 — Data ingest** (in progress): Dukascopy fetch → bi5 decode →
-  1 s bars → DuckDB-queryable Parquet store. Pure half done (slices
-  1–4a); the Dukascopy adapter and the orchestrator on top of it are
-  done (4b, 5); the persistent bar store and a CLI entry are next
-  (6, 7).
+  1 s bars → DuckDB hot store. Pure half done (slices 1–4a); the
+  Dukascopy adapter and the orchestrator on top of it are done (4b, 5);
+  the DuckDB bar store landed in slice 6; a CLI entry is next (7).
   - **Slice 1 done** (`875d214`): `src/shared/dukascopy/bi5.ts` —
     pure 20-byte big-endian tick-record decoder. Bid/ask/bidVol/askVol.
   - **Slice 2 done** (`c056920`): `src/shared/bars/aggregate.ts` —
@@ -100,17 +103,27 @@ Runtime deps so far: `dukascopy-node` (URL layout for the datafeed) and
     real bi5/aggregate, fake client/store — most importantly the
     EURUSD 1e5 vs USDJPY/XAUUSD 1e3 scale selection, which would
     silently produce 100×-wrong prices (no throw) if mis-wired.
-  - **Slice 6 next**: DuckDB bar store. Implements the `BarStore`
-    interface from slice 5 against a real DuckDB-queryable Parquet
-    layout (paths from `src/shared/storage/paths.ts`). Adds `duckdb`
-    runtime dep and the project's first I/O-bound integration tests
-    (per `development-workflow.mdc` §"Integration tests").
-  - **Slice 7**: end-to-end smoke test / CLI entry that wires
-    `createDukascopyClient()` + the slice-6 store + `ingestSymbol`
-    behind a single command for one symbol × one day.
+  - **Slice 6 done**: DuckDB bar store. `src/main/data/duckDbBarStore.ts`
+    implements `BarStore` (write-only from ingest's perspective) against
+    a single DuckDB file at `<root>/bars/1s.duckdb`, keyed on
+    `(symbol, timestamp_ms)`. `writeHour` is idempotent via
+    DELETE-then-INSERT in a transaction; the extension interface
+    `DuckDbBarStore` adds `readBarsInRange` (half-open, ascending) and
+    `close` for M3 replay. Errors surface as `BarStoreError` with a
+    `phase` tag (`validation | write | read | open | closed`). Also in
+    this slice: the `CatalogSymbol` brand + `toCatalogSymbol` validator
+    in `src/shared/instruments.ts`, which replaced the raw `string`
+    symbol parameter on `IngestSpec` and `BarStore.writeHour` so
+    downstream APIs accept only catalog-validated strings. Parquet
+    export per `ARCHITECTURE.md` is now an archival artefact produced
+    by a later slice, not the live store (see the ADR comment at the
+    top of `duckDbBarStore.ts`).
+  - **Slice 7 next**: end-to-end smoke test / CLI entry that wires
+    `createDukascopyClient()` + `createDuckDbBarStore()` +
+    `ingestSymbol` behind a single command for one symbol × one day.
 - **M3+** (replay engine, paper broker, charts, UI): not started.
 
-At HEAD (`f30763c`): 305 unit/integration tests pass, 1 skipped (the
+At HEAD of slice 6: 366 unit/integration tests pass, 1 skipped (the
 opt-in Dukascopy network test, gated by `HINDSIGHT_RUN_NETWORK=1`).
 `npm run typecheck` is clean.
 

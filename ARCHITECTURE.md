@@ -32,13 +32,13 @@ Versions below are the current stable lines as of the latest architecture review
 | UI primitives | Radix UI | latest | Accessible, unstyled primitives we theme ourselves. |
 | Styling | Tailwind CSS | 4.x | Zero-config, works well with Vite 8. |
 | Market data ingest | [`dukascopy-node`](https://github.com/Leo4815162342/dukascopy-node) | 1.46.x | Used for the Dukascopy URL scheme + holiday/availability calendar. We own the bi5 record decoder in `src/shared/dukascopy/bi5.ts` and call native `fetch` (Node ≥ 22) directly so the network seam stays inside our adapter. |
-| LZMA decompression | [`lzma`](https://github.com/nmrugg/LZMA-JS) | 2.3.x | Pure-JS LZMA1 decoder for `.bi5` payloads. Pure-JS over `lzma-native` to avoid a second native-module rebuild surface alongside DuckDB; the bi5 decode runs once per ingest, offline, so the ~2–3× pure-JS slowdown is invisible next to disk + network. |
-| Market data store | DuckDB + Parquet files | DuckDB 1.x | Columnar, fast analytic queries, per-symbol per-year files. |
+| LZMA decompression | [`lzma`](https://github.com/nmrugg/LZMA-JS) | 2.3.x | Pure-JS LZMA1 decoder for `.bi5` payloads. Pure-JS over `lzma-native` to avoid a second native-module rebuild surface; the bi5 decode runs once per ingest, offline, so the ~2–3× pure-JS slowdown is invisible next to disk + network. |
+| Market data store | DuckDB (via [`@duckdb/node-api`](https://www.npmjs.com/package/@duckdb/node-api)) + Parquet archive | DuckDB 1.5.x (exact-pinned) | Columnar, fast analytic queries. Neo Node API is promise-native and ships prebuilt binaries per platform, so no rebuild-against-Electron-ABI step. Hot store is a single DuckDB file; Parquet is the archival/export format (see "Storage tiers" below). |
 | App data store | better-sqlite3 | latest matching Electron's Node | Transactional, great for trades/journal/settings. |
 | Test runner | Vitest | 4.x | Fast, native TS, ESM-first. |
 | Packaging | electron-builder | latest | Produces a Windows installer. |
 
-Version policy: bump majors promptly (within a sprint of release), pin exact versions in `package.json` for the Electron-native pieces (`better-sqlite3`, `duckdb`) since they rebuild against Electron's Node ABI, and use caret ranges elsewhere.
+Version policy: bump majors promptly (within a sprint of release), pin exact versions in `package.json` for DuckDB (the schema is coupled to the engine version) and for Electron-native pieces that rebuild against Electron's Node ABI (`better-sqlite3`); use caret ranges elsewhere.
 
 ### Why klinecharts over TradingView Lightweight Charts
 
@@ -61,10 +61,13 @@ No open-source chart lib has a polished Elliott Wave tool. We build one on top o
 | Tier | Format | Purpose |
 | --- | --- | --- |
 | Raw ticks | `.bi5` files on disk, one per symbol/day/hour | Archive + optional tick-accurate fills |
-| 1-second OHLCV (base) | Parquet, one file per (symbol, year) | Primary replay source |
+| 1-second OHLCV (hot store) | DuckDB table `bars_1s` in a single database file at `bars/1s.duckdb` | Primary replay source, and the target of the ingest `BarStore`. |
+| 1-second OHLCV (archive/export) | Parquet, one file per (symbol, year) at `bars/1s/<SYMBOL>_<YYYY>.parquet` | Long-lived, portable copy produced by a separate export step; not written during ingest. |
 | Higher timeframes | Derived on the fly from 1s via DuckDB aggregation | 1m, 5m, 15m, 1h, 4h, 1D |
 
 1s bars are built from every tick, so fill realism is preserved without paying for tick-level storage.
+
+**Why the hot store is DuckDB, not Parquet**: ingest arrives one UTC hour at a time, and Parquet files are immutable — "append one hour to the year's Parquet" means rewrite-the-whole-file, which goes quadratic over 8760 hours/year. The DuckDB table accepts an idempotent DELETE-then-INSERT per hour in a single transaction, making writes O(hour) and giving M3 replay a keyed range query (`symbol + timestamp_ms`) out of the box. The per-year Parquet files become an archival artefact produced on demand or at year-boundary rollover; until the export slice lands (post-M3), the DuckDB file is the full source of truth.
 
 ### Disk layout
 
@@ -72,7 +75,9 @@ No open-source chart lib has a polished Elliott Wave tool. We build one on top o
 %APPDATA%/Hindsight/
 ├── data/
 │   ├── ticks/<symbol>/<year>/<month>/<day>/<hour>h_ticks.bi5
-│   └── bars/1s/<symbol>_<year>.parquet
+│   └── bars/
+│       ├── 1s.duckdb                       (hot store; live ingest target)
+│       └── 1s/<SYMBOL>_<YYYY>.parquet      (archive/export; produced post-ingest)
 ├── app.sqlite        (trades, journal, drawings, settings)
 └── logs/
 ```
