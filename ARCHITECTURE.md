@@ -96,6 +96,7 @@ The replay engine owns a single `cursor: Date`. Any query for market data in rep
 src/
 ├── main/                 Electron main (Node)
 │   ├── data/             dukascopy-node wrapper, Parquet writer, DuckDB queries
+│   ├── cli/              one-shot runners on top of data/ — first inhabitant: ingestSymbolDay (M2 slice 7)
 │   ├── replay/           clock + cursor + event bus
 │   ├── broker/           orders, positions, fills, P&L, swap
 │   └── persistence/      SQLite repositories

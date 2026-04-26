@@ -39,6 +39,11 @@ Runtime deps: `dukascopy-node` (URL layout for the datafeed) and
     DuckDB-backed implementation of `BarStore`, with a
     `DuckDbBarStore` extension surface that adds `readBarsInRange` +
     `close` for M3 replay).
+  - `src/main/cli/` — one-shot runners that compose `data/`. First
+    inhabitant: `ingestDay.ts` (`ingestSymbolDay`, M2 slice 7) — owns
+    date parsing, the 24-hour range, and the open → ingest → close
+    lifecycle. The store factory is injected so the runner stays
+    fake-able; production wiring uses `createDuckDbBarStore`.
 - `src/renderer/` — React UI (planned M3+).
 - Tests live co-located: `<module>.test.ts` next to `<module>.ts`.
 
@@ -59,7 +64,9 @@ Runtime deps: `dukascopy-node` (URL layout for the datafeed) and
 - **M2 — Data ingest** (in progress): Dukascopy fetch → bi5 decode →
   1 s bars → DuckDB hot store. Pure half done (slices 1–4a); the
   Dukascopy adapter and the orchestrator on top of it are done (4b, 5);
-  the DuckDB bar store landed in slice 6; a CLI entry is next (7).
+  the DuckDB bar store landed in slice 6; the day runner that composes
+  all three landed in slice 7; the CLI bin shim and the full-year
+  acceptance pass are next.
   - **Slice 1 done** (`875d214`): `src/shared/dukascopy/bi5.ts` —
     pure 20-byte big-endian tick-record decoder. Bid/ask/bidVol/askVol.
   - **Slice 2 done** (`c056920`): `src/shared/bars/aggregate.ts` —
@@ -118,12 +125,31 @@ Runtime deps: `dukascopy-node` (URL layout for the datafeed) and
     export per `ARCHITECTURE.md` is now an archival artefact produced
     by a later slice, not the live store (see the ADR comment at the
     top of `duckDbBarStore.ts`).
-  - **Slice 7 next**: end-to-end smoke test / CLI entry that wires
-    `createDukascopyClient()` + `createDuckDbBarStore()` +
-    `ingestSymbol` behind a single command for one symbol × one day.
+  - **Slice 7 done**: `src/main/cli/ingestDay.ts` —
+    `ingestSymbolDay({ symbol, dayUtc, root }, { client, openStore,
+    onHourComplete? })`. Strict `YYYY-MM-DD` parser (regex + UTC
+    round-trip catches Feb 30, month 13, year out of `[1970, 9999]`,
+    timestamps with time portions); `toCatalogSymbol` for symbol
+    validation; opens the store via the injected factory; calls
+    `ingestSymbol` over `[startOfDayUtc, startOfNextDayUtc)`; closes
+    the store in `finally`. Single owned error class `IngestRunError`
+    with `phase ∈ "date" | "symbol" | "open" | "ingest" | "close"` and
+    `cause` preserving the originating layer's error. Lifecycle
+    contract: if both ingest and close fail, the ingest error wins
+    (close failure is suppressed); if ingest succeeds and close fails,
+    that surfaces as `phase: "close"`. The CLI bin shim was
+    deliberately deferred from this slice — it needs a TS dev runner
+    (`tsx` or `--experimental-strip-types` + a tsconfig accommodation)
+    which is its own dependency decision; the runner alone is the
+    fake-able, reviewable unit, and any future caller (bin, UI,
+    acceptance test) targets the same function.
+  - **Slice 8 next**: CLI bin shim that imports `ingestSymbolDay`,
+    constructs the real `DukascopyClient` + `DuckDbBarStore` factory,
+    and exposes them behind a single npm-runnable command. Gated on
+    picking the TS dev runner.
 - **M3+** (replay engine, paper broker, charts, UI): not started.
 
-At HEAD of slice 6: 366 unit/integration tests pass, 1 skipped (the
+At HEAD of slice 7: 397 unit/integration tests pass, 1 skipped (the
 opt-in Dukascopy network test, gated by `HINDSIGHT_RUN_NETWORK=1`).
 `npm run typecheck` is clean.
 
