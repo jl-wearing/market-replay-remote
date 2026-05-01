@@ -36,6 +36,7 @@ Versions below are the current stable lines as of the latest architecture review
 | Market data store | DuckDB (via [`@duckdb/node-api`](https://www.npmjs.com/package/@duckdb/node-api)) + Parquet archive | DuckDB 1.5.x (exact-pinned) | Columnar, fast analytic queries. Neo Node API is promise-native and ships prebuilt binaries per platform, so no rebuild-against-Electron-ABI step. Hot store is a single DuckDB file; Parquet is the archival/export format (see "Storage tiers" below). |
 | App data store | better-sqlite3 | latest matching Electron's Node | Transactional, great for trades/journal/settings. |
 | Test runner | Vitest | 4.x | Fast, native TS, ESM-first. |
+| TS dev runner | [`tsx`](https://github.com/privatenumber/tsx) | 4.x | Runs TypeScript entry points (e.g. `npm run ingest`) directly without an emit step. Chosen over Node 22's `--experimental-strip-types` because the codebase imports with `.js` suffixes that resolve to `.ts` files (NodeNext + `verbatimModuleSyntax`), which native strip-types does not handle without an additional loader; tsx handles it transparently. Dev-only — never enters the Electron production bundle. |
 | Packaging | electron-builder | latest | Produces a Windows installer. |
 
 Version policy: bump majors promptly (within a sprint of release), pin exact versions in `package.json` for DuckDB (the schema is coupled to the engine version) and for Electron-native pieces that rebuild against Electron's Node ABI (`better-sqlite3`); use caret ranges elsewhere.
