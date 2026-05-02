@@ -39,11 +39,15 @@ Runtime deps: `dukascopy-node` (URL layout for the datafeed) and
     DuckDB-backed implementation of `BarStore`, with a
     `DuckDbBarStore` extension surface that adds `readBarsInRange` +
     `close` for M3 replay).
-  - `src/main/cli/` — one-shot runners that compose `data/`. First
-    inhabitant: `ingestDay.ts` (`ingestSymbolDay`, M2 slice 7) — owns
-    date parsing, the 24-hour range, and the open → ingest → close
-    lifecycle. The store factory is injected so the runner stays
-    fake-able; production wiring uses `createDuckDbBarStore`.
+  - `src/main/cli/` — one-shot runners that compose `data/`.
+    `ingestDay.ts` (`ingestSymbolDay`, M2 slice 7) owns date parsing,
+    the 24-hour range, and the open → ingest → close lifecycle; the
+    store factory is injected so the runner stays fake-able and
+    production wiring uses `createDuckDbBarStore`. `runIngestCli.ts`
+    + `ingestDayMain.ts` (M2 slice 8) sit on top of it as the npm-
+    runnable bin shim — `runIngestCli` is the testable shell (argv
+    parsing, factories, exit codes), `ingestDayMain` is the
+    process-glue boundary executed by `tsx`.
 - `src/renderer/` — React UI (planned M3+).
 - Tests live co-located: `<module>.test.ts` next to `<module>.ts`.
 
@@ -65,8 +69,9 @@ Runtime deps: `dukascopy-node` (URL layout for the datafeed) and
   1 s bars → DuckDB hot store. Pure half done (slices 1–4a); the
   Dukascopy adapter and the orchestrator on top of it are done (4b, 5);
   the DuckDB bar store landed in slice 6; the day runner that composes
-  all three landed in slice 7; the CLI bin shim and the full-year
-  acceptance pass are next.
+  all three landed in slice 7; the CLI bin shim landed in slice 8.
+  Only remaining M2 work is a full-year acceptance pass (run the bin
+  against a real Dukascopy year and eyeball the resulting DuckDB file).
   - **Slice 1 done** (`875d214`): `src/shared/dukascopy/bi5.ts` —
     pure 20-byte big-endian tick-record decoder. Bid/ask/bidVol/askVol.
   - **Slice 2 done** (`c056920`): `src/shared/bars/aggregate.ts` —
@@ -143,13 +148,33 @@ Runtime deps: `dukascopy-node` (URL layout for the datafeed) and
     which is its own dependency decision; the runner alone is the
     fake-able, reviewable unit, and any future caller (bin, UI,
     acceptance test) targets the same function.
-  - **Slice 8 next**: CLI bin shim that imports `ingestSymbolDay`,
-    constructs the real `DukascopyClient` + `DuckDbBarStore` factory,
-    and exposes them behind a single npm-runnable command. Gated on
-    picking the TS dev runner.
+  - **Slice 8 done** (`cddaf98`): CLI bin shim. Split into
+    `src/main/cli/runIngestCli.ts` (testable shell — argv parsing with
+    its own `CliArgsError` + `code` discriminating tag, construct-once
+    factories `createClient` / `openStore`, stdout/stderr writer hooks,
+    exit-code mapping 0/1/2) and `src/main/cli/ingestDayMain.ts` (five
+    lines of `process.argv` / `process.stdout` / `process.exitCode`
+    glue, run by `tsx`, never imported by tests). Production wires
+    `createDukascopyClient()` and `(root) => createDuckDbBarStore({
+    root })`; tests inject hand-rolled fakes for both. Invoked via
+    `npm run ingest -- --symbol EURUSD --day 2024-01-15 --root C:/data`.
+    `tsx` was added as a dev-only TS runner and recorded in the
+    `ARCHITECTURE.md` "Technology stack" table; it is chosen over Node
+    22's `--experimental-strip-types` because the codebase imports
+    with `.js` suffixes pointing at `.ts` files (NodeNext +
+    `verbatimModuleSyntax`), which native strip-types does not
+    resolve. The breaking block is split (`parseArgv shape` +
+    `runIngestCli propagation`) under the documented ≥8-tests-across-
+    ≥2-surfaces threshold; per-file `expectArgsError` helper asserts
+    both class and `code`. Deliberately deferred non-goals:
+    `--key=value` argv form, multi-day ranges, progress bars, config
+    files (multi-day belongs above `ingestSymbolDay` in a future
+    runner; the rest are M3+ ergonomics).
+  - **Acceptance pass next**: run the bin against a real Dukascopy
+    year and eyeball the resulting DuckDB file. Then M2 closes.
 - **M3+** (replay engine, paper broker, charts, UI): not started.
 
-At HEAD of slice 7: 397 unit/integration tests pass, 1 skipped (the
+At HEAD of slice 8: 425 unit/integration tests pass, 1 skipped (the
 opt-in Dukascopy network test, gated by `HINDSIGHT_RUN_NETWORK=1`).
 `npm run typecheck` is clean.
 

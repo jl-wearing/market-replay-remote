@@ -83,9 +83,15 @@ Do not merge steps 2 and 4. Do not commit without the DoD walk.
     Pinned exactly (DuckDB couples its on-disk schema to the engine
     version). Higher-timeframe aggregation will ride on top of the
     same table in a later slice.
-- Dev deps (Vitest, TypeScript, `@types/node`) stay pinned to major
-  versions compatible with Node 22. Do **not** bump `@types/node` past
-  `^22` while the runtime stays on Node 22.
+- Dev deps (Vitest, TypeScript, `@types/node`, `tsx`) stay pinned to
+  major versions compatible with Node 22. Do **not** bump `@types/node`
+  past `^22` while the runtime stays on Node 22. `tsx` was added in
+  M2 slice 8 (`cddaf98`) as the dev-only TS runner for `npm run
+  ingest`; chosen over Node 22's `--experimental-strip-types` because
+  the codebase imports with `.js` suffixes that resolve to `.ts` files
+  (NodeNext + `verbatimModuleSyntax`). `tsx` never enters the Electron
+  production bundle — do not propose replacing it with native
+  strip-types without first solving the `.js`→`.ts` resolution gap.
 
 ## I/O adapter seam pattern (M2 onward)
 
