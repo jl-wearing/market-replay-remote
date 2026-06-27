@@ -105,11 +105,16 @@ export const INSTRUMENTS: Readonly<Record<string, InstrumentSpec>> = Object.free
     pipSize: 0.01,
   },
   XAGUSD: {
-    // Dukascopy quotes XAGUSD to 4 decimals on the tick feed (tick step
-    // 0.0001), but the user-facing pip for stop-loss entry is 0.001 per
-    // MT4 convention, giving $5/pip at 1 standard lot (0.001 × 5000 oz).
-    // `pipSize` here is the pip unit; tick-feed precision belongs to the
-    // data layer (M2) and does not change sizing math.
+    // `pipSize` 0.001 is the user-facing pip for stop-loss entry (MT4
+    // convention), giving $5/pip at 1 standard lot (0.001 × 5000 oz).
+    // The Dukascopy bi5 wire scale is sourced separately from
+    // `dukascopy-node`'s decimalFactor (1000 for XAGUSD → 3 decimals) by
+    // src/main/data/priceScale.ts, and pinned by its test. We keep
+    // `pipSize` explicit rather than deriving it from the wire scale
+    // because they are different concepts (pip = a sizing unit, wire scale
+    // = a feed-encoding detail) and other silver feeds encode the price to
+    // a different number of decimals. Wire precision lives in the data
+    // layer and does not change sizing math.
     symbol: "XAGUSD",
     displayName: "Silver / USD",
     assetClass: "metal",

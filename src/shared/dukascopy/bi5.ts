@@ -57,7 +57,13 @@ export class InvalidBi5Error extends Error {
  * Throws `InvalidBi5Error` on: buffer length not a multiple of 20; NaN /
  * Infinity / non-positive `priceScale`; NaN / Infinity `hourStartMs`; any
  * record whose intra-hour offset is >= 3 600 000 (would span hours and
- * indicates a corrupt file).
+ * indicates a corrupt file); any record whose volume field is non-finite
+ * (NaN / ±Infinity — indicates a corrupt payload, same family as an
+ * out-of-range offset). Note the boundary: a *negative-but-finite* volume
+ * is a data-quality concern, not a structural one, so it passes through
+ * untouched — `ticksToSecondBars` and the bar store reject it. Prices are
+ * decoded from `u32` divided by a positive scale, so they are always
+ * finite and need no such check.
  */
 export function decodeBi5Records(
   decompressed: Uint8Array,
@@ -104,6 +110,18 @@ export function decodeBi5Records(
       throw new InvalidBi5Error(
         `record ${i}: msFromHourStart=${msFromHourStart} >= 3_600_000 ` +
           `(would span hours; indicates corrupt payload)`,
+      );
+    }
+    if (!Number.isFinite(volumeAsk)) {
+      throw new InvalidBi5Error(
+        `record ${i}: volumeAsk=${volumeAsk} is not finite ` +
+          `(indicates corrupt payload)`,
+      );
+    }
+    if (!Number.isFinite(volumeBid)) {
+      throw new InvalidBi5Error(
+        `record ${i}: volumeBid=${volumeBid} is not finite ` +
+          `(indicates corrupt payload)`,
       );
     }
 

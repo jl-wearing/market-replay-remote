@@ -181,6 +181,24 @@ describe("decodeBi5Records — edge cases", () => {
     expect(tick!.volumeBid).toBe(0);
     expect(tick!.volumeAsk).toBe(0);
   });
+
+  it("does NOT throw on a negative-but-finite volume (data-quality, owned by aggregate not the parser)", () => {
+    // Boundary pin: the parser rejects only *structurally* corrupt
+    // (non-finite) volumes. A negative-but-finite volume is a
+    // data-quality concern owned by `ticksToSecondBars` / the bar store,
+    // and must round-trip through the parser untouched. If someone later
+    // moves negative-volume rejection into bi5, this test fails loudly.
+    const record = encodeBi5Record({
+      msFromHourStart: 0,
+      bid: 1.0,
+      ask: 1.0001,
+      volumeBid: -1,
+      volumeAsk: 1,
+      priceScale: FOREX_SCALE,
+    });
+    const [tick] = decodeBi5Records(record, HOUR_START_MS, FOREX_SCALE);
+    expect(tick!.volumeBid).toBeCloseTo(-1, 6);
+  });
 });
 
 describe("decodeBi5Records — breaking tests (must throw)", () => {
@@ -276,6 +294,34 @@ describe("decodeBi5Records — breaking tests (must throw)", () => {
     expect(() => decodeBi5Records(bytes, HOUR_START_MS, FOREX_SCALE)).toThrow(
       InvalidBi5Error,
     );
+  });
+
+  it("throws when a record's volumeAsk is NaN (corrupt f32 payload)", () => {
+    const record = encodeBi5Record({
+      msFromHourStart: 100,
+      bid: 1.0,
+      ask: 1.0001,
+      volumeBid: 1,
+      volumeAsk: Number.NaN,
+      priceScale: FOREX_SCALE,
+    });
+    expect(() =>
+      decodeBi5Records(record, HOUR_START_MS, FOREX_SCALE),
+    ).toThrow(InvalidBi5Error);
+  });
+
+  it("throws when a record's volumeBid is +Infinity (corrupt f32 payload)", () => {
+    const record = encodeBi5Record({
+      msFromHourStart: 100,
+      bid: 1.0,
+      ask: 1.0001,
+      volumeBid: Number.POSITIVE_INFINITY,
+      volumeAsk: 1,
+      priceScale: FOREX_SCALE,
+    });
+    expect(() =>
+      decodeBi5Records(record, HOUR_START_MS, FOREX_SCALE),
+    ).toThrow(InvalidBi5Error);
   });
 
   it("InvalidBi5Error carries a descriptive message", () => {
