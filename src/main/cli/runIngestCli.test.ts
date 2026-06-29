@@ -50,14 +50,22 @@ interface FakeStoreHandle {
   closeCount: () => number;
 }
 
-function makeFakeStore(opts: { closeError?: Error } = {}): FakeStoreHandle {
+function makeFakeStore(opts: {
+  closeError?: Error;
+  /**
+   * Hours (UTC ms) the store should report as already present. Drives the
+   * resume predicate in `--resume` mode: `readBarsInRange` returns one bar
+   * for these hours (→ skipped) and an empty array otherwise.
+   */
+  presentHours?: ReadonlySet<number>;
+} = {}): FakeStoreHandle {
   let closeCount = 0;
   const store: DuckDbBarStore = {
     async writeHour() {
       // accept silently
     },
-    async readBarsInRange(): Promise<Bar[]> {
-      return [];
+    async readBarsInRange({ fromMs }): Promise<Bar[]> {
+      return opts.presentHours?.has(fromMs) ? [oneBarAt(fromMs)] : [];
     },
     async close() {
       closeCount += 1;
@@ -67,6 +75,16 @@ function makeFakeStore(opts: { closeError?: Error } = {}): FakeStoreHandle {
     },
   };
   return { store, closeCount: () => closeCount };
+}
+
+/** Throwaway bar, only used to make a resumed hour's `readBarsInRange` non-empty. */
+function oneBarAt(hourMs: number): Bar {
+  return {
+    timestampMs: hourMs,
+    oBid: 1, hBid: 1, lBid: 1, cBid: 1,
+    oAsk: 1, hAsk: 1, lAsk: 1, cAsk: 1,
+    volumeBid: 1, volumeAsk: 1, tickCount: 1,
+  };
 }
 
 interface ClientHandle {
@@ -163,6 +181,7 @@ describe("runIngestCli — core behaviour", () => {
       symbol: "EURUSD",
       day: DAY,
       root: ROOT,
+      resume: false,
     });
   });
 
@@ -180,6 +199,7 @@ describe("runIngestCli — core behaviour", () => {
       symbol: "EURUSD",
       day: DAY,
       root: ROOT,
+      resume: false,
     });
   });
 
@@ -188,6 +208,25 @@ describe("runIngestCli — core behaviour", () => {
     expect(parseArgv(["-h"])).toEqual({ kind: "help" });
     expect(parseArgv(["--symbol", "EURUSD", "--help"])).toEqual({
       kind: "help",
+    });
+  });
+
+  it("parseArgv defaults resume to false and accepts --resume as a boolean flag", () => {
+    expect(parseArgv(["--symbol", "EURUSD", "--day", DAY, "--root", ROOT])).toEqual({
+      kind: "args",
+      symbol: "EURUSD",
+      day: DAY,
+      root: ROOT,
+      resume: false,
+    });
+    expect(
+      parseArgv(["--symbol", "EURUSD", "--day", DAY, "--root", ROOT, "--resume"]),
+    ).toEqual({
+      kind: "args",
+      symbol: "EURUSD",
+      day: DAY,
+      root: ROOT,
+      resume: true,
     });
   });
 
@@ -379,6 +418,23 @@ describe("runIngestCli — breaking tests (parseArgv shape)", () => {
       { code: "positional-arg" },
     );
   });
+
+  it("rejects a duplicate --resume", () => {
+    expectArgsError(
+      () =>
+        parseArgv([
+          "--symbol",
+          "EURUSD",
+          "--day",
+          DAY,
+          "--root",
+          ROOT,
+          "--resume",
+          "--resume",
+        ]),
+      { code: "duplicate-flag" },
+    );
+  });
 });
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -506,6 +562,107 @@ describe("runIngestCli — breaking tests (runIngestCli propagation)", () => {
     // The user must be able to see *why* the ingest failed without an
     // instanceof walk: cause chain content is on stderr.
     expect(rec.stderr.join("\n")).toContain("fetch");
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────
+describe("runIngestCli — resume mode (--resume)", () => {
+  const DAY_END_HOUR = DAY_START + 23 * 3_600_000;
+
+  it("happy run: uses the resumable runner, prints ResumableIngestStats, exits 0", async () => {
+    const { deps, rec } = makeDeps();
+
+    const code = await runIngestCli(
+      ["--symbol", "EURUSD", "--day", DAY, "--root", ROOT, "--resume"],
+      deps,
+    );
+
+    expect(code).toBe(0);
+    const last = rec.stdout[rec.stdout.length - 1];
+    expect(last).toBeDefined();
+    const stats = JSON.parse(last!) as Record<string, number>;
+    // ResumableIngestStats shape (distinct from the strict IngestStats).
+    expect(stats["hoursTotal"]).toBe(24);
+    expect(stats["hoursIngested"]).toBe(24);
+    expect(stats["hoursSkipped"]).toBe(0);
+    expect(stats["hoursFailed"]).toBe(0);
+    expect(rec.stderr).toEqual([]);
+  });
+
+  it("skips hours already present and reports them on stdout", async () => {
+    const present = new Set<number>([DAY_START, DAY_START + 3_600_000]);
+    const store = makeFakeStore({ presentHours: present });
+    const { deps, rec } = makeDeps({ openStore: async () => store.store });
+
+    const code = await runIngestCli(
+      ["--symbol", "EURUSD", "--day", DAY, "--root", ROOT, "--resume"],
+      deps,
+    );
+
+    expect(code).toBe(0);
+    const stats = JSON.parse(rec.stdout[rec.stdout.length - 1]!) as Record<
+      string,
+      number
+    >;
+    expect(stats["hoursSkipped"]).toBe(2);
+    expect(stats["hoursIngested"]).toBe(22);
+    expect(rec.stdout.join("\n")).toMatch(/skip/i);
+  });
+
+  it("a per-hour fetch failure does not abort: exit 1, failure on stderr, stats record the gap", async () => {
+    const failingClient: DukascopyClient = {
+      async fetchHour(args: FetchHourArgs): Promise<Uint8Array> {
+        if (args.hourStartMs === DAY_END_HOUR) throw new Error("network down");
+        return new Uint8Array(0);
+      },
+    };
+    const { deps, rec } = makeDeps({ client: failingClient });
+
+    const code = await runIngestCli(
+      ["--symbol", "EURUSD", "--day", DAY, "--root", ROOT, "--resume"],
+      deps,
+    );
+
+    // Completed the walk, but a gap remains → non-zero so a re-run loop retries.
+    expect(code).toBe(1);
+    const stats = JSON.parse(rec.stdout[rec.stdout.length - 1]!) as Record<
+      string,
+      number
+    >;
+    expect(stats["hoursFailed"]).toBe(1);
+    expect(stats["hoursIngested"]).toBe(23);
+    expect(rec.stderr.join("\n")).toContain(String(DAY_END_HOUR));
+  });
+
+  it("without --resume the strict (fail-fast) runner is used: a fetch failure aborts with exit 1", async () => {
+    const failingClient = makeFakeClient({ error: new Error("network down") });
+    const { deps, rec } = makeDeps({ client: failingClient.client });
+
+    const code = await runIngestCli(
+      ["--symbol", "EURUSD", "--day", DAY, "--root", ROOT],
+      deps,
+    );
+
+    expect(code).toBe(1);
+    // Strict path stops on the first hour, so only one fetch happened.
+    expect(failingClient.callCount()).toBe(1);
+    // Strict path prints no resumable stats JSON.
+    expect(rec.stdout.join("\n")).not.toMatch(/hoursTotal/);
+  });
+
+  it("a resume run whose underlying store fails to open still maps to exit 1 (phase=open)", async () => {
+    const failingOpener: OpenDuckDbBarStore = async () => {
+      throw new BarStoreError("disk full", { phase: "open" });
+    };
+    const { deps, rec } = makeDeps({ openStore: failingOpener });
+
+    const code = await runIngestCli(
+      ["--symbol", "EURUSD", "--day", DAY, "--root", ROOT, "--resume"],
+      deps,
+    );
+
+    expect(code).toBe(1);
+    expect(rec.stderr.join("\n")).toContain("open");
   });
 });
 

@@ -37,6 +37,7 @@
 import type { DukascopyClient } from "../data/dukascopyClient.js";
 import { ingestSymbolDay, IngestRunError } from "./ingestDay.js";
 import type { OpenDuckDbBarStore } from "./ingestDay.js";
+import { resumableIngestSymbolDay } from "./resumableIngestDay.js";
 
 /**
  * Discriminating tag on `CliArgsError`. Mirrors the `phase` tag pattern
@@ -81,6 +82,12 @@ export interface ParsedArgs {
   readonly symbol: string;
   readonly day: string;
   readonly root: string;
+  /**
+   * `true` when `--resume` was passed. Selects the resumable runner
+   * (skip-existing + continue-on-error) over the strict, fail-fast one.
+   * Defaults to `false`.
+   */
+  readonly resume: boolean;
 }
 
 /** Help was requested. The runner short-circuits, prints usage, exits 0. */
@@ -115,11 +122,13 @@ export interface RunIngestCliDeps {
  * Tests assert each flag name appears exactly once.
  */
 export const USAGE = [
-  "Usage: npm run ingest -- --symbol <SYMBOL> --day <YYYY-MM-DD> --root <PATH>",
+  "Usage: npm run ingest -- --symbol <SYMBOL> --day <YYYY-MM-DD> --root <PATH> [--resume]",
   "",
   "  --symbol  Catalog symbol (e.g. EURUSD, USDJPY, XAUUSD).",
   "  --day     UTC calendar day to ingest, strict YYYY-MM-DD.",
   "  --root    Filesystem root for the DuckDB hot store.",
+  "  --resume  Skip hours already in the store and continue past per-hour",
+  "            failures (collected, not fatal). Exits 1 if any hour failed.",
   "  --help    Show this message and exit.",
 ].join("\n");
 
@@ -141,9 +150,19 @@ export function parseArgv(argv: readonly string[]): ParseResult {
   let symbol: string | null = null;
   let day: string | null = null;
   let root: string | null = null;
+  let resume = false;
 
   for (let i = 0; i < argv.length; i++) {
     const tok = argv[i]!;
+    if (tok === "--resume") {
+      if (resume) {
+        throw new CliArgsError(`flag --resume specified more than once`, {
+          code: "duplicate-flag",
+        });
+      }
+      resume = true;
+      continue;
+    }
     if (KNOWN_FLAGS.has(tok)) {
       const value = argv[i + 1];
       if (value === undefined || value.startsWith("--") || value === "-h") {
@@ -196,7 +215,7 @@ export function parseArgv(argv: readonly string[]): ParseResult {
     );
   }
 
-  return { kind: "args", symbol: symbol!, day: day!, root: root! };
+  return { kind: "args", symbol: symbol!, day: day!, root: root!, resume };
 }
 
 /**
@@ -228,6 +247,27 @@ export async function runIngestCli(
 
   const client = deps.createClient();
   try {
+    if (parsed.resume) {
+      const stats = await resumableIngestSymbolDay(
+        { symbol: parsed.symbol, dayUtc: parsed.day, root: parsed.root },
+        {
+          client,
+          openStore: deps.openStore,
+          onHourComplete: (hourMs, count) =>
+            deps.stdout(`hour ${hourMs} → ${count} bars`),
+          onHourSkipped: (hourMs) =>
+            deps.stdout(`hour ${hourMs} → skipped (already present)`),
+          onHourFailed: (f) =>
+            deps.stderr(`hour ${f.hourMs} → FAILED [phase=${f.phase}]: ${f.message}`),
+        },
+      );
+      deps.stdout(JSON.stringify(stats));
+      // A completed walk with gaps exits non-zero so a re-run loop (run
+      // until exit 0) drives the backfill to completion; skip-existing makes
+      // each re-run fetch only the remaining hours.
+      return stats.hoursFailed > 0 ? 1 : 0;
+    }
+
     const stats = await ingestSymbolDay(
       { symbol: parsed.symbol, dayUtc: parsed.day, root: parsed.root },
       {

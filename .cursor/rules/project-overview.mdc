@@ -69,9 +69,11 @@ Runtime deps: `dukascopy-node` (URL layout for the datafeed) and
   1 s bars → DuckDB hot store. Pure half done (slices 1–4a); the
   Dukascopy adapter and the orchestrator on top of it are done (4b, 5);
   the DuckDB bar store landed in slice 6; the day runner that composes
-  all three landed in slice 7; the CLI bin shim landed in slice 8.
-  Only remaining M2 work is a full-year acceptance pass (run the bin
-  against a real Dukascopy year and eyeball the resulting DuckDB file).
+  all three landed in slice 7; the CLI bin shim landed in slice 8; the
+  resumable (skip-existing + continue-on-error) ingest path and its
+  `--resume` CLI flag landed in slice 9. Only remaining M2 work is a
+  full-year acceptance pass (run the bin against a real Dukascopy year
+  and eyeball the resulting DuckDB file) — now restartable via `--resume`.
   - **Slice 1 done** (`875d214`): `src/shared/dukascopy/bi5.ts` —
     pure 20-byte big-endian tick-record decoder. Bid/ask/bidVol/askVol.
   - **Slice 2 done** (`c056920`): `src/shared/bars/aggregate.ts` —
@@ -170,11 +172,31 @@ Runtime deps: `dukascopy-node` (URL layout for the datafeed) and
     `--key=value` argv form, multi-day ranges, progress bars, config
     files (multi-day belongs above `ingestSymbolDay` in a future
     runner; the rest are M3+ ergonomics).
+  - **Slice 9 done**: resumable ingest wired into the CLI.
+    `src/main/data/resumableIngest.ts` (`resumableIngestSymbol`, an
+    hour-by-hour wrapper over `ingestSymbol` that collects per-hour
+    failures instead of aborting and skips hours an injected `hasHour`
+    predicate reports present) gains a day-level runner
+    `src/main/cli/resumableIngestDay.ts` (`resumableIngestSymbolDay`).
+    That runner reuses `ingestDay.ts`'s now-exported `parseDayUtc` /
+    `parseSymbol` helpers and its `IngestRunError` / `IngestRunPhase`
+    contract verbatim, swapping only the body: it composes
+    `resumableIngestSymbol` and wires `hasHour` to the opened store's
+    `readBarsInRange` (hour present ⇔ ≥1 bar). `runIngestCli` gains a
+    boolean `--resume` flag (default off; `ParsedArgs.resume`,
+    duplicate → `duplicate-flag`) selecting the resumable runner; it
+    streams per-hour `complete` / `skipped` lines to stdout, `failed`
+    lines to stderr, prints the final `ResumableIngestStats` JSON, and
+    exits 0 iff `hoursFailed === 0` (else 1, so a re-run loop drives the
+    backfill to completion). Strict path and exit-2 argv contract
+    unchanged. `ingestDayMain.ts` needs no change — `--resume` flows
+    through `process.argv`.
   - **Acceptance pass next**: run the bin against a real Dukascopy
-    year and eyeball the resulting DuckDB file. Then M2 closes.
+    year (now restartable via `--resume`) and eyeball the resulting
+    DuckDB file. Then M2 closes.
 - **M3+** (replay engine, paper broker, charts, UI): not started.
 
-At HEAD of slice 8: 425 unit/integration tests pass, 1 skipped (the
+At HEAD of slice 9: 478 unit/integration tests pass, 1 skipped (the
 opt-in Dukascopy network test, gated by `HINDSIGHT_RUN_NETWORK=1`).
 `npm run typecheck` is clean.
 

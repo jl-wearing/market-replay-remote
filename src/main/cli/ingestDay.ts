@@ -191,12 +191,26 @@ export async function ingestSymbolDay(
   return stats;
 }
 
-interface ParsedDay {
+/**
+ * The half-open UTC hour range spanning a single calendar day, as returned
+ * by {@link parseDayUtc}. `[fromHourMs, toHourMs)` is exactly 24 hours.
+ */
+export interface ParsedDay {
+  /** Inclusive lower bound — midnight UTC of the requested day, epoch ms. */
   fromHourMs: number;
+  /** Exclusive upper bound — midnight UTC of the following day, epoch ms. */
   toHourMs: number;
 }
 
-function parseDayUtc(dayUtc: unknown): ParsedDay {
+/**
+ * Parse a strict `YYYY-MM-DD` UTC day string into its `[start, nextStart)`
+ * hour range. Rejects malformed strings, calendar-impossible dates (Feb 30,
+ * month 13, day 0), and years outside `[1970, 9999]` with
+ * `IngestRunError({ phase: "date" })`. Shared verbatim by both the strict
+ * (`ingestSymbolDay`) and resumable (`resumableIngestSymbolDay`) day runners
+ * so their date contract cannot drift.
+ */
+export function parseDayUtc(dayUtc: unknown): ParsedDay {
   if (typeof dayUtc !== "string") {
     throw new IngestRunError(
       `dayUtc must be a YYYY-MM-DD string, got ${JSON.stringify(dayUtc)}`,
@@ -237,7 +251,13 @@ function parseDayUtc(dayUtc: unknown): ParsedDay {
   return { fromHourMs, toHourMs: fromHourMs + ONE_DAY_MS };
 }
 
-function parseSymbol(symbol: unknown): CatalogSymbol {
+/**
+ * Validate a raw symbol through `toCatalogSymbol`, re-framing any rejection
+ * as `IngestRunError({ phase: "symbol" })` with the original validator error
+ * preserved as `cause`. Shared by both day runners so symbol rejection
+ * surfaces identically regardless of the ingest strategy.
+ */
+export function parseSymbol(symbol: unknown): CatalogSymbol {
   try {
     // Cast to `string` only at the typed boundary; `toCatalogSymbol`
     // re-checks `typeof === "string"` itself.
