@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { catalogToDukascopy } from "../../shared/dukascopy/symbolMap.js";
+import { INSTRUMENTS } from "../../shared/instruments.js";
 import {
   UnsupportedDukascopySymbolError,
   dukascopyPriceScale,
@@ -127,6 +128,52 @@ describe("dukascopyPriceScale — breaking tests (must throw)", () => {
     } catch (err) {
       expect(err).toBeInstanceOf(UnsupportedDukascopySymbolError);
       expect((err as UnsupportedDukascopySymbolError).symbol).toBe("xxx-bogus");
+    }
+  });
+});
+
+describe("dukascopyPriceScale — pip vs wire-scale relationship (reconciled narrative)", () => {
+  // Executable pin for the corrected pip≠wire story documented in the
+  // `instruments.ts` header and this module's header. The bi5 wire step is
+  // `1 / decimalFactor`; a pip is `pipSize`. For the current catalog every
+  // pip is a whole number of wire steps, Dukascopy quotes at least as fine
+  // as a pip, and XAGUSD is the UNIQUE instrument where pip == wire step.
+  // This stops the long-standing (and backwards) "XAGUSD is the one that
+  // diverges" myth from creeping back in: it is the one that *coincides*.
+  const catalog = Object.values(INSTRUMENTS);
+
+  /** `pipSize` expressed in whole bi5 wire steps: pipSize / (1 / decimalFactor). */
+  function wireStepsPerPip(symbol: string): number {
+    const decimalFactor = dukascopyPriceScale(catalogToDukascopy(symbol));
+    return spec(symbol).pipSize * decimalFactor;
+  }
+
+  function spec(symbol: string) {
+    const s = INSTRUMENTS[symbol];
+    if (s === undefined) throw new Error(`no catalog entry for ${symbol}`);
+    return s;
+  }
+
+  it("every instrument's pip is a positive whole number of bi5 wire steps", () => {
+    for (const s of catalog) {
+      const steps = wireStepsPerPip(s.symbol);
+      // Float-tolerant integer check (0.0001 * 100000 = 10.000…02 etc.).
+      expect(Math.abs(steps - Math.round(steps))).toBeLessThan(1e-9);
+      expect(Math.round(steps)).toBeGreaterThanOrEqual(1);
+    }
+  });
+
+  it("XAGUSD is the ONLY instrument whose pip equals its wire step (1 step per pip)", () => {
+    const coincident = catalog
+      .filter((s) => Math.round(wireStepsPerPip(s.symbol)) === 1)
+      .map((s) => s.symbol);
+    expect(coincident).toEqual(["XAGUSD"]);
+  });
+
+  it("every non-XAGUSD instrument is quoted strictly finer than its pip (>1 step per pip)", () => {
+    for (const s of catalog) {
+      if (s.symbol === "XAGUSD") continue;
+      expect(Math.round(wireStepsPerPip(s.symbol))).toBeGreaterThan(1);
     }
   });
 });

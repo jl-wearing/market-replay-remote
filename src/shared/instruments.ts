@@ -52,10 +52,17 @@ export interface InstrumentSpec {
  * class, because pip-value and sizing math branch on the category.
  *
  * Note on `pipSize` vs tick-feed precision: `pipSize` here is the unit a
- * user enters stops in, not the smallest price increment Dukascopy publishes.
- * For most instruments the two coincide; for XAGUSD they deliberately do not
- * (see the comment on that entry). The tick-feed precision will be tracked
- * separately in the data layer once it lands (M2).
+ * user enters stops in, NOT the smallest price increment Dukascopy publishes.
+ * They are independent concepts and must not be derived from one another.
+ * For the current catalog Dukascopy actually quotes *finer* than a pip on
+ * nearly every instrument (e.g. EURUSD: 0.0001 pip vs a 0.00001 wire step —
+ * the fractional pip; USDJPY: 0.01 vs 0.001). XAGUSD is the lone instrument
+ * where the two happen to coincide (0.001 == 0.001) — which is exactly why
+ * pipSize is not a safe substitute for the wire scale: deriving one from the
+ * other would look correct for silver and be 10x wrong for everything else.
+ * The wire scale is tracked separately in `src/main/data/priceScale.ts`
+ * (sourced from `dukascopy-node`'s `decimalFactor`); the relationship is
+ * pinned by an invariant in `priceScale.test.ts`.
  */
 export const INSTRUMENTS: Readonly<Record<string, InstrumentSpec>> = Object.freeze({
   // ── direct (quote = USD) ───────────────────────────────────────────────
@@ -107,14 +114,16 @@ export const INSTRUMENTS: Readonly<Record<string, InstrumentSpec>> = Object.free
   XAGUSD: {
     // `pipSize` 0.001 is the user-facing pip for stop-loss entry (MT4
     // convention), giving $5/pip at 1 standard lot (0.001 × 5000 oz).
-    // The Dukascopy bi5 wire scale is sourced separately from
-    // `dukascopy-node`'s decimalFactor (1000 for XAGUSD → 3 decimals) by
-    // src/main/data/priceScale.ts, and pinned by its test. We keep
-    // `pipSize` explicit rather than deriving it from the wire scale
-    // because they are different concepts (pip = a sizing unit, wire scale
-    // = a feed-encoding detail) and other silver feeds encode the price to
-    // a different number of decimals. Wire precision lives in the data
-    // layer and does not change sizing math.
+    // For Dukascopy this happens to equal the bi5 wire step: the wire
+    // scale is decimalFactor 1000 → 3 decimals → 0.001. Silver coincides
+    // here and ONLY here in the catalog — every other instrument is quoted
+    // finer than its pip (see the header note). We still keep `pipSize`
+    // explicit rather than deriving it from the wire scale, because they are
+    // different concepts (pip = a sizing unit, wire scale = a feed-encoding
+    // detail) and other silver feeds encode to a different number of
+    // decimals. The wire scale is sourced from `dukascopy-node` by
+    // src/main/data/priceScale.ts and pinned by its test; it lives in the
+    // data layer and never enters sizing math.
     symbol: "XAGUSD",
     displayName: "Silver / USD",
     assetClass: "metal",

@@ -207,5 +207,9 @@ opt-in Dukascopy network test, gated by `HINDSIGHT_RUN_NETWORK=1`).
 - One slice per commit. Commit title: `<area>: <imperative summary>`
   where `<area>` is a directory name under `src/` (or `docs`, `chore`).
 - `pipSize` in `instruments.ts` is the user-facing pip (what goes into
-  stop-loss entry), not the tick-feed precision. For XAGUSD they differ
-  — see the comment on that spec.
+  stop-loss entry), a separate concept from the bi5 wire precision
+  (`src/main/data/priceScale.ts`). Dukascopy quotes finer than a pip on
+  nearly every instrument; XAGUSD is the lone case where pip and wire step
+  coincide (0.001), which is exactly why `pipSize` must not be derived from
+  the wire scale. Pinned by the "pip vs wire-scale" invariant in
+  `priceScale.test.ts`. See the comment on that spec.

@@ -4,8 +4,12 @@
  * `decodeBi5Records` (`src/shared/dukascopy/bi5.ts`) needs the integer
  * divisor Dukascopy used to encode the prices in the bi5 records (1e5 for
  * most FX, 1e3 for JPY-quoted pairs, metals, and indices). The catalog's
- * `pipSize` is the *user-facing* pip and explicitly differs from the wire
- * scale (XAGUSD is the canonical case), so it is not a substitute.
+ * `pipSize` is the *user-facing* pip and a separate concept from this wire
+ * scale, so it is not a substitute: Dukascopy quotes finer than a pip on
+ * nearly every instrument, and XAGUSD is the lone case where pip and wire
+ * step happen to coincide — deriving one from the other would pass for
+ * silver and be 10x wrong elsewhere. The relationship is pinned by the
+ * "pip vs wire-scale" invariant in the companion test.
  *
  * Rather than maintain a parallel table that would drift, this module
  * reads the value straight out of `dukascopy-node`'s
