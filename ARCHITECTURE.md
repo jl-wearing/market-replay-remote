@@ -23,10 +23,11 @@ Versions below are the current stable lines as of the latest architecture review
 
 | Layer | Choice | Target version | Why |
 | --- | --- | --- | --- |
-| Shell | Electron | 41.x | Mature, easy Windows packaging, works with the Node libs we need. Ships with Node 24 + Chromium 146. |
+| Shell | Electron | 43.x | Mature, easy Windows packaging, works with the Node libs we need. (Tracking latest-stable per the version policy below; was 41.x at the M0–M3 architecture review.) |
+| Electron build | electron-vite | 5.x | Orchestrates the three Vite builds (main / preload / renderer) + HMR with sensible Electron defaults. Added in M4 slice 1. Caps Vite at ^7 (see below). |
 | Language | TypeScript | 6.0.x | One language end-to-end; strict mode catches bugs early. |
 | Frontend runtime | React | 19.x | Latest stable line; React 18 is past its active phase and has a trail of CVEs we don't want to inherit. |
-| Frontend tooling | Vite | 8.x | Standard, fast HMR. |
+| Frontend tooling | Vite | 7.x | Standard, fast HMR. Pinned to ^7 (not 8) because electron-vite 5 supports Vite ^5/^6/^7 only; revisit when electron-vite ships Vite 8 support. Paired with `@vitejs/plugin-react` 5.x (the plugin major that supports Vite 7). |
 | Chart | [klinecharts](https://klinecharts.com/en-US/) | 9.x (pinned) until 10.x leaves beta | MIT-licensed; ships drawing tools and ~25 indicators. 10.0.0-beta has breaking API changes (`setDataLoader`, formatter rename, etc.) — we'll revisit at M4. |
 | State | Zustand | 5.x | Small, no boilerplate. |
 | UI primitives | Radix UI | latest | Accessible, unstyled primitives we theme ourselves. |
@@ -35,7 +36,10 @@ Versions below are the current stable lines as of the latest architecture review
 | LZMA decompression | [`lzma`](https://github.com/nmrugg/LZMA-JS) | 2.3.x | Pure-JS LZMA1 decoder for `.bi5` payloads. Pure-JS over `lzma-native` to avoid a second native-module rebuild surface; the bi5 decode runs once per ingest, offline, so the ~2–3× pure-JS slowdown is invisible next to disk + network. |
 | Market data store | DuckDB (via [`@duckdb/node-api`](https://www.npmjs.com/package/@duckdb/node-api)) + Parquet archive | DuckDB 1.5.x (exact-pinned) | Columnar, fast analytic queries. Neo Node API is promise-native and ships prebuilt binaries per platform, so no rebuild-against-Electron-ABI step. Hot store is a single DuckDB file; Parquet is the archival/export format (see "Storage tiers" below). |
 | App data store | better-sqlite3 | latest matching Electron's Node | Transactional, great for trades/journal/settings. |
-| Test runner | Vitest | 4.x | Fast, native TS, ESM-first. |
+| Test runner | Vitest | 4.x | Fast, native TS, ESM-first. Two projects: a **node** project (pure/`main` suites, Node env) and a **browser** project for renderer component/hook tests. |
+| Component tests | Vitest browser mode (`@vitest/browser` + `@vitest/browser-playwright`) | 4.x | Renderer component/hook tests in real Chromium via the Playwright provider (Vitest 4 takes the provider as a factory from `@vitest/browser-playwright`, not a string). Added M4 slice 1. |
+| Component test utils | React Testing Library (`@testing-library/react` + `/dom`) | latest | User-centric render/query helpers for the browser-project tests. |
+| E2E | Playwright (`@playwright/test`, `_electron.launch`) | 1.x | Drives the built Electron app end-to-end (boot, IPC round-trip, later chart/perf). Also the browser provider binary for Vitest browser mode. Specs in `e2e/`; `npm run test:e2e`. Added M4 slice 1. |
 | TS dev runner | [`tsx`](https://github.com/privatenumber/tsx) | 4.x | Runs TypeScript entry points (e.g. `npm run ingest`) directly without an emit step. Chosen over Node 22's `--experimental-strip-types` because the codebase imports with `.js` suffixes that resolve to `.ts` files (NodeNext + `verbatimModuleSyntax`), which native strip-types does not handle without an additional loader; tsx handles it transparently. Dev-only — never enters the Electron production bundle. |
 | Packaging | electron-builder | latest | Produces a Windows installer. |
 
@@ -96,17 +100,23 @@ The replay engine owns a single `cursor: Date`. Any query for market data in rep
 ```
 src/
 ├── main/                 Electron main (Node)
+│   ├── index.ts          app entry: creates the BrowserWindow (M4 slice 1)
 │   ├── data/             dukascopy-node wrapper, Parquet writer, DuckDB queries
 │   ├── cli/              one-shot runners on top of data/ — first inhabitant: ingestSymbolDay (M2 slice 7)
 │   ├── replay/           clock + cursor + event bus
+│   ├── ipc/              typed IPC handlers bridging renderer ↔ replay/data (M4 slice 2)
 │   ├── broker/           orders, positions, fills, P&L, swap
 │   └── persistence/      SQLite repositories
+├── preload/              contextBridge seam; the only channel into the isolated renderer (M4 slice 1)
 ├── shared/               pure TS; importable from both processes
 │   ├── instruments.ts    InstrumentSpec catalog (pip size, contract size, ...)
 │   ├── sizing.ts         lot-size calculator
 │   ├── types.ts          Bar, Tick, Order, Position, Account, ...
-│   └── ipc-contract.ts   typed IPC surface
+│   └── ipc-contract.ts   typed IPC surface (M4 slice 2)
 └── renderer/             React app (chart, panels, drawings)
+
+TypeScript is split into two projects (`tsconfig.node.json` for main/shared/preload,
+`tsconfig.renderer.json` for renderer — DOM + JSX); `npm run typecheck` runs both.
 ```
 
 **`shared/` has no dependency on Electron, Node-only APIs, DuckDB, or SQLite.** It is pure, synchronous TypeScript and can be unit-tested in milliseconds. The bulk of business logic that is easy to get wrong (sizing, fill math, indicator math, P&L accrual, swap accrual) lives here.

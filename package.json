@@ -6,25 +6,44 @@
   "author": "",
   "license": "UNLICENSED",
   "type": "module",
+  "main": "./out/main/index.js",
   "engines": {
     "node": ">=22"
   },
   "scripts": {
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "preview": "electron-vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
-    "typecheck": "tsc --noEmit",
+    "test:e2e": "playwright test",
+    "typecheck": "tsc -p tsconfig.node.json --noEmit && tsc -p tsconfig.renderer.json --noEmit",
     "ingest": "tsx src/main/cli/ingestDayMain.ts"
   },
   "devDependencies": {
+    "@playwright/test": "^1.61.1",
+    "@testing-library/dom": "^10.4.1",
+    "@testing-library/react": "^16.3.2",
     "@types/lzma": "^2.3.0",
     "@types/node": "^22.0.0",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^5.2.0",
+    "@vitest/browser": "^4.1.9",
+    "@vitest/browser-playwright": "^4.1.9",
+    "electron": "^43.0.0",
+    "electron-vite": "^5.0.0",
+    "playwright": "^1.61.1",
     "tsx": "^4.21.0",
     "typescript": "^6.0.3",
+    "vite": "^7.3.6",
     "vitest": "^4.1.4"
   },
   "dependencies": {
     "@duckdb/node-api": "1.5.2-r.1",
     "dukascopy-node": "^1.46.4",
-    "lzma": "^2.3.2"
+    "lzma": "^2.3.2",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7"
   }
 }
