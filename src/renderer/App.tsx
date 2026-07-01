@@ -1,18 +1,18 @@
 import type { ReactElement } from "react";
+import { ReplayDebugPanel } from "./ReplayDebugPanel.js";
 
 /**
- * Root application component (M4 slice 1 — placeholder).
+ * Root application component (M4 slice 2).
  *
- * The chart, playback controls, and replay wiring arrive in later M4 slices;
- * for now this just proves the React tree renders inside the Electron window.
- * A stable `data-testid` gives the Playwright boot smoke test something concrete
- * to assert on.
+ * Renders the replay debug panel wired to the real preload bridge
+ * (`window.hindsight.replay`). The chart and real controls replace the panel in
+ * later M4 slices; the `data-testid`s give the E2E suite concrete anchors.
  */
 export function App(): ReactElement {
   return (
     <main data-testid="app-root">
       <h1>Hindsight</h1>
-      <p>Replay engine ready — chart coming in a later M4 slice.</p>
+      <ReplayDebugPanel api={window.hindsight.replay} />
     </main>
   );
 }
